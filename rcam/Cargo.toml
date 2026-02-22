@@ -1,0 +1,119 @@
+[package]
+name = "rcam"
+version.workspace = true
+edition.workspace = true
+description = "Cross-platform camera capture and video recording for iOS, macOS, Android, Linux, Windows, and WASM"
+license.workspace = true
+repository.workspace = true
+keywords = ["camera", "video", "capture", "cross-platform", "wasm"]
+categories = ["multimedia::video", "hardware-support"]
+
+# ---------------------------------------------------------------------------
+# Features — backend-* are organisational markers; platform deps are always
+# compiled for the matching target (same pattern as cpal / winit).
+# ---------------------------------------------------------------------------
+[features]
+default = []
+
+backend-avfoundation = []
+backend-android      = []
+backend-v4l2         = []
+backend-mf           = []
+backend-web          = []
+
+# Optional capabilities
+ffmpeg-encoding = ["dep:ffmpeg-next"]
+serde           = ["dep:serde"]
+image-output    = ["dep:image"]
+
+# ---------------------------------------------------------------------------
+# Cross-platform dependencies
+# ---------------------------------------------------------------------------
+[dependencies]
+async-trait = { workspace = true }
+thiserror   = { workspace = true }
+
+serde       = { version = "1", features = ["derive"], optional = true }
+image       = { version = "0.25", optional = true }
+ffmpeg-next = { version = "7", optional = true }
+
+# ---------------------------------------------------------------------------
+# macOS + iOS — AVFoundation
+# ---------------------------------------------------------------------------
+[target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
+objc2 = "0.5"
+objc2-av-foundation = { version = "0.3", features = [
+    "AVCaptureSession",
+    "AVCaptureDevice",
+    "AVCaptureInput",          # base class; includes AVCaptureDeviceInput
+    "AVCaptureVideoDataOutput",
+    "AVCapturePhotoOutput",
+    "AVAssetWriter",
+    "AVAssetWriterInput",
+    "AVCaptureFileOutput",     # base class; includes AVCaptureMovieFileOutput
+]}
+objc2-foundation = "0.3"
+objc2-core-media = "0.3"
+objc2-core-video = "0.3"
+
+# ---------------------------------------------------------------------------
+# Android — Camera2 NDK
+# ---------------------------------------------------------------------------
+[target.'cfg(target_os = "android")'.dependencies]
+rcam-sys-android = { path = "../rcam-sys-android" }
+jni = "0.21"
+
+# ---------------------------------------------------------------------------
+# Linux — V4L2
+# ---------------------------------------------------------------------------
+[target.'cfg(target_os = "linux")'.dependencies]
+v4l = "0.14"
+
+# ---------------------------------------------------------------------------
+# Windows — Media Foundation
+# ---------------------------------------------------------------------------
+[target.'cfg(target_os = "windows")'.dependencies.windows]
+version = "0.58"
+features = [
+    "Media_Capture",
+    "Media_MediaProperties",
+    "Devices_Enumeration",
+    "Foundation_Collections",
+]
+
+# ---------------------------------------------------------------------------
+# WASM — Web APIs
+# ---------------------------------------------------------------------------
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen         = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys               = "0.3"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
+version = "0.3"
+features = [
+    "MediaDevices",
+    "MediaStream",
+    "MediaStreamConstraints",
+    "MediaRecorder",
+    "MediaRecorderOptions",
+    "BlobEvent",
+    "ImageCapture",
+    "MediaStreamTrack",
+    "Navigator",
+    "Window",
+    "HtmlVideoElement",
+    "InputDeviceInfo",
+]
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+
+[[example]]
+name = "list_devices"
+
+[[example]]
+name = "snapshot"
+
+[[example]]
+name = "record"

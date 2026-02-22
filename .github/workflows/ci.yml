@@ -1,0 +1,160 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # -------------------------------------------------------------------------
+  # Linux — V4L2 backend
+  # -------------------------------------------------------------------------
+  linux:
+    name: Linux (V4L2)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check (Linux)
+        run: cargo check -p rcam
+
+      - name: Build (Linux)
+        run: cargo build -p rcam
+
+      - name: Run mock backend tests
+        run: cargo test -p rcam mock_camera
+
+      - name: Clippy
+        run: cargo clippy -p rcam -- -D warnings
+
+  # -------------------------------------------------------------------------
+  # macOS — AVFoundation backend
+  # -------------------------------------------------------------------------
+  macos:
+    name: macOS (AVFoundation)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check (macOS)
+        run: cargo check -p rcam
+
+      - name: Build (macOS)
+        run: cargo build -p rcam
+
+      - name: Run mock backend tests
+        run: cargo test -p rcam mock_camera
+
+      - name: Clippy
+        run: cargo clippy -p rcam -- -D warnings
+
+  # -------------------------------------------------------------------------
+  # Windows — Media Foundation backend
+  # -------------------------------------------------------------------------
+  windows:
+    name: Windows (Media Foundation)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Check (Windows)
+        run: cargo check -p rcam
+
+      - name: Build (Windows)
+        run: cargo build -p rcam
+
+      - name: Run mock backend tests
+        run: cargo test -p rcam mock_camera
+
+  # -------------------------------------------------------------------------
+  # WASM — Web backend
+  # -------------------------------------------------------------------------
+  wasm:
+    name: WASM (Web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + wasm32 target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Check (WASM)
+        run: cargo check -p rcam --target wasm32-unknown-unknown
+
+  # -------------------------------------------------------------------------
+  # Android — Camera2 NDK backend (check only; no hardware in CI)
+  # -------------------------------------------------------------------------
+  android:
+    name: Android (Camera2 NDK — check only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + Android targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Check (Android aarch64)
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo check -p rcam --target aarch64-linux-android
+
+  # -------------------------------------------------------------------------
+  # Format + doc check (runs fast on ubuntu)
+  # -------------------------------------------------------------------------
+  fmt-and-doc:
+    name: Format & Docs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable + rustfmt
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build docs
+        run: cargo doc -p rcam --no-deps
