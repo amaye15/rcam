@@ -36,7 +36,12 @@ pub fn enumerate_devices() -> Result<Vec<CameraInfo>, CameraError> {
             _ => CameraPosition::Unknown,
         };
         let is_default = default_id.as_deref() == Some(id.as_str());
-        result.push(CameraInfo { id, name, position, is_default });
+        result.push(CameraInfo {
+            id,
+            name,
+            position,
+            is_default,
+        });
     }
 
     Ok(result)
@@ -108,5 +113,9 @@ pub fn request_permission() -> Result<(), CameraError> {
     }
 
     let granted = rx.recv().unwrap_or(false);
-    if granted { Ok(()) } else { Err(CameraError::PermissionDenied) }
+    if granted {
+        Ok(())
+    } else {
+        Err(CameraError::PermissionDenied)
+    }
 }

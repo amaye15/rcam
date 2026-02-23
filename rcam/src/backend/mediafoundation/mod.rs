@@ -25,15 +25,15 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 use async_trait::async_trait;
-use windows::core::HSTRING;
-use windows::Foundation::{AsyncStatus, IAsyncAction};
+use windows::core::{Interface, HSTRING};
+use windows::Foundation::{AsyncStatus, IAsyncAction, IAsyncInfo};
 use windows::Media::Capture::{
     LowLagMediaRecording, LowLagPhotoCapture, MediaCapture, MediaCaptureInitializationSettings,
 };
 use windows::Media::MediaProperties::{
     ImageEncodingProperties, MediaEncodingProfile, VideoEncodingQuality,
 };
-use windows::Storage::Streams::DataReader;
+use windows::Storage::Streams::{DataReader, IInputStream, IRandomAccessStream};
 
 use crate::traits::CameraDevice;
 use crate::{
@@ -61,6 +61,36 @@ fn wrt_action(op: IAsyncAction) -> windows::core::Result<()> {
     }
 }
 
+/// Wait on any WinRT async operation that exposes `IAsyncInfo` but is not
+/// an `IAsyncOperation<T>` (e.g. `DataReaderLoadOperation`).
+///
+/// Returns `Ok(())` on completion. Does not retrieve a result value.
+fn wrt_wait<T: Interface>(op: &T) -> windows::core::Result<()> {
+    let info: IAsyncInfo = op.cast()?;
+    loop {
+        let status = info.Status()?;
+        if status == AsyncStatus::Completed {
+            return Ok(());
+        }
+        if status != AsyncStatus::Started {
+            return Err(windows::core::Error::from(info.ErrorCode()?));
+        }
+        std::hint::spin_loop();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// SendLowLag — thin wrapper so LowLagMediaRecording crosses spawn_blocking
+// ---------------------------------------------------------------------------
+
+/// Newtype that asserts `LowLagMediaRecording` is safe to send across threads.
+///
+/// SAFETY: WinRT `LowLagMediaRecording` implements `IAgileObject` and is
+/// therefore safe to use from multiple threads. The `Mutex` in `MfCamera`
+/// serialises all accesses to the active recording.
+struct SendLowLag(LowLagMediaRecording);
+unsafe impl Send for SendLowLag {}
+
 // ---------------------------------------------------------------------------
 // MfCamera
 // ---------------------------------------------------------------------------
@@ -78,7 +108,7 @@ pub struct MfCamera {
 }
 
 struct ActiveRecording {
-    session: LowLagMediaRecording,
+    session: SendLowLag,
     output_path: PathBuf,
     is_temp: bool,
 }
@@ -196,27 +226,32 @@ impl CameraDevice for MfCamera {
             )
             .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            // Read the JPEG bytes from the captured frame's stream.
+            // CapturedFrame implements IRandomAccessStream and IInputStream.
+            // Use IRandomAccessStream to get the byte size, then DataReader to
+            // read the JPEG bytes via IInputStream.
             let frame = photo
                 .Frame()
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
-            let stream = frame
-                .GetStream()
-                .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            let size = stream
+            let ras: IRandomAccessStream = frame
+                .cast()
+                .map_err(|e| CameraError::Backend(e.to_string()))?;
+            let size = ras
                 .Size()
                 .map_err(|e| CameraError::Backend(e.to_string()))? as u32;
 
-            let reader = DataReader::CreateDataReader(&stream)
+            let input: IInputStream = frame
+                .cast()
+                .map_err(|e| CameraError::Backend(e.to_string()))?;
+            let reader = DataReader::CreateDataReader(&input)
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            wrt_get(
-                reader
-                    .LoadAsync(size)
-                    .map_err(|e| CameraError::Backend(e.to_string()))?,
-            )
-            .map_err(|e| CameraError::Backend(e.to_string()))?;
+            // LoadAsync returns DataReaderLoadOperation, not IAsyncOperation<T>,
+            // so use wrt_wait (IAsyncInfo-based) instead of wrt_get.
+            let load_op = reader
+                .LoadAsync(size)
+                .map_err(|e| CameraError::Backend(e.to_string()))?;
+            wrt_wait(&load_op).map_err(|e| CameraError::Backend(e.to_string()))?;
 
             let mut data = vec![0u8; size as usize];
             reader
@@ -279,7 +314,8 @@ impl CameraDevice for MfCamera {
             )
             .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            Ok::<LowLagMediaRecording, CameraError>(session)
+            // Wrap in SendLowLag so the value can cross the spawn_blocking boundary.
+            Ok::<SendLowLag, CameraError>(SendLowLag(session))
         })
         .await
         .map_err(|e| CameraError::Backend(e.to_string()))??;
@@ -305,6 +341,8 @@ impl CameraDevice for MfCamera {
             .ok_or(CameraError::NotRecording)?;
 
         tokio::task::spawn_blocking(move || {
+            let session = session.0;
+
             wrt_action(
                 session
                     .StopAsync()
@@ -354,8 +392,8 @@ impl CameraDevice for MfCamera {
     {
         // If recording was in progress, stop it gracefully (best-effort).
         if let Some(rec) = self.recording.into_inner().unwrap() {
-            let _ = rec.session.StopAsync();
-            let _ = rec.session.FinishAsync();
+            let _ = rec.session.0.StopAsync();
+            let _ = rec.session.0.FinishAsync();
         }
         // MediaCapture is released when dropped (COM reference counting).
         Ok(())

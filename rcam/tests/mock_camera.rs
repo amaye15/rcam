@@ -3,6 +3,10 @@
 //! The mock backend synthesises frames and satisfies the full `CameraDevice`
 //! trait without touching any hardware. This lets CI validate the public API
 //! on every platform (including Android / iOS runners without a physical camera).
+//!
+//! WASM is excluded because `tokio::test` is not available on `wasm32` and the
+//! WASM test runner uses `wasm-pack test` which compiles all test targets.
+#![cfg(not(target_arch = "wasm32"))]
 
 use std::path::PathBuf;
 

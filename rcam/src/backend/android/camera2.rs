@@ -37,7 +37,10 @@ macro_rules! ndk_ok {
     ($expr:expr, $msg:literal) => {{
         let status = $expr;
         if status != 0 {
-            return Err(CameraError::Backend(format!("{}: NDK status {}", $msg, status)));
+            return Err(CameraError::Backend(format!(
+                "{}: NDK status {}",
+                $msg, status
+            )));
         }
     }};
 }
@@ -67,7 +70,9 @@ pub fn enumerate_devices() -> Result<Vec<CameraInfo>, CameraError> {
     for i in 0..num {
         // SAFETY: `cameraIds` is an array of `numCameras` valid C strings.
         let raw_id = unsafe { *id_list.cameraIds.add(i) };
-        let id = unsafe { CStr::from_ptr(raw_id) }.to_string_lossy().into_owned();
+        let id = unsafe { CStr::from_ptr(raw_id) }
+            .to_string_lossy()
+            .into_owned();
 
         let position = query_lens_facing(manager.0, raw_id);
         let is_default = i == 0;
@@ -90,7 +95,8 @@ fn query_lens_facing(
     raw_id: *const std::os::raw::c_char,
 ) -> CameraPosition {
     let mut meta_ptr: *mut ffi::ACameraMetadata = std::ptr::null_mut();
-    let ok = unsafe { ffi::ACameraManager_getCameraCharacteristics(manager, raw_id, &mut meta_ptr) };
+    let ok =
+        unsafe { ffi::ACameraManager_getCameraCharacteristics(manager, raw_id, &mut meta_ptr) };
     if ok != 0 || meta_ptr.is_null() {
         return CameraPosition::Unknown;
     }
@@ -105,10 +111,10 @@ fn query_lens_facing(
         // successful `getConstEntry` with a BYTE-type tag.
         let facing = unsafe { *entry.data.u8_ };
         match facing {
-            ffi::ACAMERA_LENS_FACING_FRONT    => CameraPosition::Front,
-            ffi::ACAMERA_LENS_FACING_BACK     => CameraPosition::Back,
+            ffi::ACAMERA_LENS_FACING_FRONT => CameraPosition::Front,
+            ffi::ACAMERA_LENS_FACING_BACK => CameraPosition::Back,
             ffi::ACAMERA_LENS_FACING_EXTERNAL => CameraPosition::External,
-            _                                  => CameraPosition::Unknown,
+            _ => CameraPosition::Unknown,
         }
     } else {
         CameraPosition::Unknown
@@ -129,7 +135,9 @@ impl Manager {
     fn new() -> Result<Self, CameraError> {
         let ptr = unsafe { ffi::ACameraManager_create() };
         if ptr.is_null() {
-            Err(CameraError::Backend("ACameraManager_create returned null".into()))
+            Err(CameraError::Backend(
+                "ACameraManager_create returned null".into(),
+            ))
         } else {
             Ok(Self(ptr))
         }
@@ -181,8 +189,12 @@ unsafe fn extract_frame(image: *mut ffi::AImage) -> Option<Frame> {
     let mut height: i32 = 0;
     let mut ts_ns: i64 = 0;
 
-    if ffi::AImage_getWidth(image, &mut width) != ffi::AMEDIA_OK { return None; }
-    if ffi::AImage_getHeight(image, &mut height) != ffi::AMEDIA_OK { return None; }
+    if ffi::AImage_getWidth(image, &mut width) != ffi::AMEDIA_OK {
+        return None;
+    }
+    if ffi::AImage_getHeight(image, &mut height) != ffi::AMEDIA_OK {
+        return None;
+    }
     let _ = ffi::AImage_getTimestamp(image, &mut ts_ns);
 
     let w = width as usize;
@@ -194,9 +206,11 @@ unsafe fn extract_frame(image: *mut ffi::AImage) -> Option<Frame> {
         let mut data_ptr: *const u8 = std::ptr::null();
         let mut data_len: i32 = 0;
         let mut row_stride: i32 = 1;
-        let mut px_stride:  i32 = 1;
+        let mut px_stride: i32 = 1;
 
-        if ffi::AImage_getPlaneData(image, plane_idx, &mut data_ptr, &mut data_len) != ffi::AMEDIA_OK {
+        if ffi::AImage_getPlaneData(image, plane_idx, &mut data_ptr, &mut data_len)
+            != ffi::AMEDIA_OK
+        {
             return None;
         }
         let _ = ffi::AImage_getPlaneRowStride(image, plane_idx, &mut row_stride);
@@ -239,11 +253,15 @@ unsafe fn extract_frame(image: *mut ffi::AImage) -> Option<Frame> {
 
 struct SessionContext {
     state: Mutex<SessionState>,
-    cvar:  Condvar,
+    cvar: Condvar,
 }
 
 #[derive(PartialEq)]
-enum SessionState { Pending, Active, Error }
+enum SessionState {
+    Pending,
+    Active,
+    Error,
+}
 
 unsafe extern "C" fn on_session_active(ctx: *mut c_void, _: *mut ffi::ACameraCaptureSession) {
     let sc = &*(ctx as *const SessionContext);
@@ -284,21 +302,21 @@ unsafe extern "C" fn on_device_error(
 /// All NDK objects are freed in reverse-creation order by `Drop`.
 pub(super) struct Camera2Session {
     // NDK objects — freed in drop() in reverse order.
-    manager:        *mut ffi::ACameraManager,
-    device:         *mut ffi::ACameraDevice,
-    reader:         *mut ffi::AImageReader,
-    reader_window:  *mut ffi::ANativeWindow,
-    session:        *mut ffi::ACameraCaptureSession,
-    request:        *mut ffi::ACaptureRequest,
-    output_target:  *mut ffi::ACameraOutputTarget,
+    manager: *mut ffi::ACameraManager,
+    device: *mut ffi::ACameraDevice,
+    reader: *mut ffi::AImageReader,
+    reader_window: *mut ffi::ANativeWindow,
+    session: *mut ffi::ACameraCaptureSession,
+    request: *mut ffi::ACaptureRequest,
+    output_target: *mut ffi::ACameraOutputTarget,
     session_output: *mut ffi::ACaptureSessionOutput,
-    container:      *mut ffi::ACaptureSessionOutputContainer,
+    container: *mut ffi::ACaptureSessionOutputContainer,
     // Image listener struct — kept alive so the NDK can fire the callback.
-    _listener:      Box<ffi::AImageReader_ImageListener>,
+    _listener: Box<ffi::AImageReader_ImageListener>,
     // Frame context box — keep alive until Drop.
-    _frame_ctx:     Box<FrameContext>,
+    _frame_ctx: Box<FrameContext>,
     // Session context box — keep alive until Drop.
-    _session_ctx:   Box<SessionContext>,
+    _session_ctx: Box<SessionContext>,
     // Resolution for metadata on frames (from config).
     pub resolution: Resolution,
 }
@@ -334,15 +352,15 @@ impl Camera2Session {
         // --- Session context (for open / session callbacks) ---
         let session_ctx = Box::new(SessionContext {
             state: Mutex::new(SessionState::Pending),
-            cvar:  Condvar::new(),
+            cvar: Condvar::new(),
         });
         let sc_ptr = &*session_ctx as *const SessionContext as *mut c_void;
 
         // --- Open camera device ---
         let device_callbacks = ffi::ACameraDevice_StateCallbacks {
-            context:        sc_ptr,
+            context: sc_ptr,
             onDisconnected: Some(on_device_disconnected),
-            onError:        Some(on_device_error),
+            onError: Some(on_device_error),
         };
         let mut device: *mut ffi::ACameraDevice = std::ptr::null_mut();
         unsafe {
@@ -377,7 +395,7 @@ impl Camera2Session {
         let fc_ptr = &*frame_ctx as *const FrameContext as *mut c_void;
 
         let mut listener = Box::new(ffi::AImageReader_ImageListener {
-            context:          fc_ptr,
+            context: fc_ptr,
             onImageAvailable: Some(on_image_available),
         });
         unsafe {
@@ -419,9 +437,9 @@ impl Camera2Session {
 
         // --- Create capture session ---
         let session_callbacks = ffi::ACameraCaptureSession_stateCallbacks {
-            context:  sc_ptr,
+            context: sc_ptr,
             onClosed: Some(on_session_closed),
-            onReady:  Some(on_session_ready),
+            onReady: Some(on_session_ready),
             onActive: Some(on_session_active),
         };
         let mut session: *mut ffi::ACameraCaptureSession = std::ptr::null_mut();
@@ -457,7 +475,11 @@ impl Camera2Session {
         let mut request: *mut ffi::ACaptureRequest = std::ptr::null_mut();
         unsafe {
             ndk_ok!(
-                ffi::ACameraDevice_createCaptureRequest(device, ffi::TEMPLATE_PREVIEW, &mut request),
+                ffi::ACameraDevice_createCaptureRequest(
+                    device,
+                    ffi::TEMPLATE_PREVIEW,
+                    &mut request
+                ),
                 "ACameraDevice_createCaptureRequest"
             );
         }
@@ -517,7 +539,13 @@ impl Camera2Session {
     pub fn add_output(
         &mut self,
         extra_window: *mut ffi::ANativeWindow,
-    ) -> Result<(*mut ffi::ACaptureSessionOutput, *mut ffi::ACameraOutputTarget), CameraError> {
+    ) -> Result<
+        (
+            *mut ffi::ACaptureSessionOutput,
+            *mut ffi::ACameraOutputTarget,
+        ),
+        CameraError,
+    > {
         unsafe {
             // Stop repeating and close the old session.
             let _ = ffi::ACameraCaptureSession_stopRepeating(self.session);
@@ -549,9 +577,9 @@ impl Camera2Session {
             // Reset session state.
             *self._session_ctx.state.lock().unwrap() = SessionState::Pending;
             let session_callbacks = ffi::ACameraCaptureSession_stateCallbacks {
-                context:  sc_ptr,
+                context: sc_ptr,
                 onClosed: Some(on_session_closed),
-                onReady:  Some(on_session_ready),
+                onReady: Some(on_session_ready),
                 onActive: Some(on_session_active),
             };
             let mut new_session: *mut ffi::ACameraCaptureSession = std::ptr::null_mut();
@@ -642,9 +670,9 @@ impl Camera2Session {
             let sc_ptr = &*self._session_ctx as *const SessionContext as *mut c_void;
             *self._session_ctx.state.lock().unwrap() = SessionState::Pending;
             let session_callbacks = ffi::ACameraCaptureSession_stateCallbacks {
-                context:  sc_ptr,
+                context: sc_ptr,
                 onClosed: Some(on_session_closed),
-                onReady:  Some(on_session_ready),
+                onReady: Some(on_session_ready),
                 onActive: Some(on_session_active),
             };
             let mut new_session: *mut ffi::ACameraCaptureSession = std::ptr::null_mut();
@@ -748,8 +776,7 @@ fn resolve_camera_id(
 
     // Enumerate to find a device matching the requested position.
     let mut id_list_ptr: *mut ffi::ACameraIdList = std::ptr::null_mut();
-    let status =
-        unsafe { ffi::ACameraManager_getCameraIdList(manager, &mut id_list_ptr) };
+    let status = unsafe { ffi::ACameraManager_getCameraIdList(manager, &mut id_list_ptr) };
     if status != ffi::ACAMERA_OK || id_list_ptr.is_null() {
         return Err(CameraError::NoCameraFound);
     }
@@ -765,7 +792,9 @@ fn resolve_camera_id(
     let mut chosen: Option<String> = None;
     for i in 0..num {
         let raw_id = unsafe { *id_list.cameraIds.add(i) };
-        let id = unsafe { CStr::from_ptr(raw_id) }.to_string_lossy().into_owned();
+        let id = unsafe { CStr::from_ptr(raw_id) }
+            .to_string_lossy()
+            .into_owned();
         let cam_pos = query_lens_facing(manager, raw_id);
         if position == cam_pos || position == CameraPosition::Unknown {
             chosen = Some(id);
@@ -776,7 +805,11 @@ fn resolve_camera_id(
     // Fallback: just use the first camera.
     if chosen.is_none() {
         let raw_id = unsafe { *id_list.cameraIds };
-        chosen = Some(unsafe { CStr::from_ptr(raw_id) }.to_string_lossy().into_owned());
+        chosen = Some(
+            unsafe { CStr::from_ptr(raw_id) }
+                .to_string_lossy()
+                .into_owned(),
+        );
     }
 
     unsafe { ffi::ACameraManager_deleteCameraIdList(id_list_ptr) };

@@ -3,9 +3,9 @@
 use std::path::PathBuf;
 use std::sync::Mutex;
 
-use objc2::{define_class, msg_send, ClassType, DefinedClass};
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::ProtocolObject;
+use objc2::{define_class, msg_send, ClassType, DefinedClass};
 use objc2_av_foundation::{
     AVCaptureConnection, AVCaptureFileOutput, AVCaptureFileOutputRecordingDelegate,
     AVCaptureMovieFileOutput, AVCaptureSession,
@@ -148,5 +148,4 @@ impl AvfRecorder {
     pub(crate) fn stop(&self) {
         unsafe { self.movie_output.stopRecording() };
     }
-
 }

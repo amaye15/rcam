@@ -28,8 +28,8 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::traits::CameraDevice;
 use crate::{
-    CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, FrameFormat,
-    RecordingOutput, Resolution, VideoData, VideoOutput,
+    CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, FrameFormat, RecordingOutput,
+    Resolution, VideoData, VideoOutput,
 };
 
 use capture::js_err;
@@ -98,13 +98,9 @@ impl CameraDevice for WebCamera {
         video.set_src_object(Some(&stream));
 
         // `play()` returns a Promise — await it so the stream is active.
-        JsFuture::from(
-            video
-                .play()
-                .map_err(|e| CameraError::Backend(js_err(e)))?,
-        )
-        .await
-        .map_err(|e| CameraError::Backend(js_err(e)))?;
+        JsFuture::from(video.play().map_err(|e| CameraError::Backend(js_err(e)))?)
+            .await
+            .map_err(|e| CameraError::Backend(js_err(e)))?;
 
         // Wait for `loadeddata` so at least one video frame is available.
         wait_for_event(&video, "loadeddata").await?;
@@ -112,7 +108,10 @@ impl CameraDevice for WebCamera {
         // Determine actual stream dimensions (may differ from config).
         let w = video.video_width().max(config.resolution.width);
         let h = video.video_height().max(config.resolution.height);
-        let resolution = Resolution { width: w, height: h };
+        let resolution = Resolution {
+            width: w,
+            height: h,
+        };
 
         // Create an off-screen <canvas> matching the stream resolution.
         let canvas = document
@@ -184,7 +183,9 @@ impl CameraDevice for WebCamera {
     async fn stop_recording(&mut self) -> Result<VideoData, CameraError> {
         let rec = self.recording.take().ok_or(CameraError::NotRecording)?;
         let bytes = rec.stop().await?;
-        Ok(VideoData { kind: VideoOutput::Buffer(bytes) })
+        Ok(VideoData {
+            kind: VideoOutput::Buffer(bytes),
+        })
     }
 
     // -----------------------------------------------------------------------

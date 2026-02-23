@@ -20,11 +20,11 @@ use crate::{CameraError, Resolution};
 
 /// Active `AMediaRecorder` session.
 pub(super) struct AndroidRecorder {
-    recorder:      *mut ffi::AMediaRecorder,
+    recorder: *mut ffi::AMediaRecorder,
     /// Surface owned by the recorder — caller must NOT free it separately.
     input_surface: *mut ffi::ANativeWindow,
     pub output_path: PathBuf,
-    pub is_temp:     bool,
+    pub is_temp: bool,
 }
 
 // SAFETY: AMediaRecorder is internally thread-safe.
@@ -44,7 +44,9 @@ impl AndroidRecorder {
     ) -> Result<Self, CameraError> {
         let recorder = unsafe { ffi::AMediaRecorder_new() };
         if recorder.is_null() {
-            return Err(CameraError::Backend("AMediaRecorder_new returned null".into()));
+            return Err(CameraError::Backend(
+                "AMediaRecorder_new returned null".into(),
+            ));
         }
 
         // Helper that aborts on NDK error.
@@ -98,7 +100,10 @@ impl AndroidRecorder {
             "setOutputFilePath"
         );
 
-        media_ok!(ffi::AMediaRecorder_prepare(recorder), "AMediaRecorder_prepare");
+        media_ok!(
+            ffi::AMediaRecorder_prepare(recorder),
+            "AMediaRecorder_prepare"
+        );
 
         // Retrieve the input surface (valid for the recorder's lifetime).
         let input_surface = unsafe { ffi::AMediaRecorder_getInputSurface(recorder) };
@@ -109,7 +114,12 @@ impl AndroidRecorder {
             ));
         }
 
-        Ok(Self { recorder, input_surface, output_path, is_temp })
+        Ok(Self {
+            recorder,
+            input_surface,
+            output_path,
+            is_temp,
+        })
     }
 
     /// The `ANativeWindow*` surface to register as a camera capture target.
@@ -123,7 +133,10 @@ impl AndroidRecorder {
     pub fn start(&self) -> Result<(), CameraError> {
         let status = unsafe { ffi::AMediaRecorder_start(self.recorder) };
         if status != ffi::AMEDIA_OK {
-            Err(CameraError::Backend(format!("AMediaRecorder_start: status {}", status)))
+            Err(CameraError::Backend(format!(
+                "AMediaRecorder_start: status {}",
+                status
+            )))
         } else {
             Ok(())
         }

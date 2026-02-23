@@ -143,12 +143,7 @@ fn build_video_constraint(config: &CameraConfig) -> JsValue {
         &JsValue::from(config.resolution.height),
     )
     .ok();
-    Reflect::set(
-        &obj,
-        &"frameRate".into(),
-        &JsValue::from(config.frame_rate),
-    )
-    .ok();
+    Reflect::set(&obj, &"frameRate".into(), &JsValue::from(config.frame_rate)).ok();
 
     obj.into()
 }

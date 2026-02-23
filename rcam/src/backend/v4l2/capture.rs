@@ -73,7 +73,9 @@ pub fn open_device(config: &CameraConfig) -> Result<V4l2Handle, CameraError> {
     let path = match &config.device_id {
         Some(id) => {
             let idx: usize = id.parse().map_err(|_| {
-                CameraError::Backend(format!("invalid device id '{id}': expected an integer index"))
+                CameraError::Backend(format!(
+                    "invalid device id '{id}': expected an integer index"
+                ))
             })?;
             PathBuf::from(format!("/dev/video{idx}"))
         }
@@ -106,9 +108,7 @@ pub fn open_device(config: &CameraConfig) -> Result<V4l2Handle, CameraError> {
     }
 
     let fourcc = negotiated.ok_or_else(|| {
-        CameraError::Backend(
-            "no supported pixel format found (tried YUYV, MJPG)".into(),
-        )
+        CameraError::Backend("no supported pixel format found (tried YUYV, MJPG)".into())
     })?;
 
     // Apply requested frame rate (best-effort; not all cameras honour it).
@@ -117,7 +117,12 @@ pub fn open_device(config: &CameraConfig) -> Result<V4l2Handle, CameraError> {
         config.frame_rate,
     )));
 
-    Ok(V4l2Handle { path, width: w, height: h, fourcc })
+    Ok(V4l2Handle {
+        path,
+        width: w,
+        height: h,
+        fourcc,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -135,7 +140,10 @@ pub fn capture_loop(handle: V4l2Handle, tx: mpsc::UnboundedSender<Frame>) {
     let dev = match Device::with_path(&handle.path) {
         Ok(d) => d,
         Err(e) => {
-            eprintln!("rcam/v4l2: failed to reopen device {}: {e}", handle.path.display());
+            eprintln!(
+                "rcam/v4l2: failed to reopen device {}: {e}",
+                handle.path.display()
+            );
             return;
         }
     };
@@ -151,7 +159,9 @@ pub fn capture_loop(handle: V4l2Handle, tx: mpsc::UnboundedSender<Frame>) {
         };
         fmt.width = handle.width;
         fmt.height = handle.height;
-        fmt.fourcc = FourCC { repr: handle.fourcc };
+        fmt.fourcc = FourCC {
+            repr: handle.fourcc,
+        };
         let _ = dev.set_format(&fmt);
     }
 
@@ -176,8 +186,7 @@ pub fn capture_loop(handle: V4l2Handle, tx: mpsc::UnboundedSender<Frame>) {
             }
         };
 
-        let timestamp_us =
-            meta.timestamp.sec as u64 * 1_000_000 + meta.timestamp.usec as u64;
+        let timestamp_us = meta.timestamp.sec as u64 * 1_000_000 + meta.timestamp.usec as u64;
 
         let (data, format) = if is_yuyv {
             (yuyv_to_bgra(buf), FrameFormat::BGRA)
@@ -185,7 +194,13 @@ pub fn capture_loop(handle: V4l2Handle, tx: mpsc::UnboundedSender<Frame>) {
             (buf.to_vec(), FrameFormat::MJPEG)
         };
 
-        let frame = Frame { data, width: w, height: h, format, timestamp_us };
+        let frame = Frame {
+            data,
+            width: w,
+            height: h,
+            format,
+            timestamp_us,
+        };
         if tx.send(frame).is_err() {
             break; // receiver dropped → camera closed
         }

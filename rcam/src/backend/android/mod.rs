@@ -33,8 +33,8 @@ use tokio::sync::mpsc;
 
 use crate::traits::CameraDevice;
 use crate::{
-    CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, RecordingOutput,
-    Resolution, VideoData, VideoOutput,
+    CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, RecordingOutput, Resolution,
+    VideoData, VideoOutput,
 };
 
 use camera2::Camera2Session;
@@ -45,11 +45,11 @@ use media::AndroidRecorder;
 // ---------------------------------------------------------------------------
 
 struct ActiveRecording {
-    recorder:       AndroidRecorder,
+    recorder: AndroidRecorder,
     /// `ACaptureSessionOutput*` for the recorder surface (opaque pointer).
-    extra_output:   *mut rcam_sys_android::ACaptureSessionOutput,
+    extra_output: *mut rcam_sys_android::ACaptureSessionOutput,
     /// `ACameraOutputTarget*` added to the capture request.
-    extra_target:   *mut rcam_sys_android::ACameraOutputTarget,
+    extra_target: *mut rcam_sys_android::ACameraOutputTarget,
 }
 
 // SAFETY: raw pointers are only accessed while holding the camera session mutex.
@@ -103,7 +103,7 @@ impl CameraDevice for AndroidCamera {
         let (frame_tx, frame_rx) = mpsc::unbounded_channel::<Frame>();
 
         let device_id = config.device_id.clone();
-        let position  = config.position;
+        let position = config.position;
         let resolution = config.resolution;
         let frame_rate = config.frame_rate;
         let tx_clone = frame_tx.clone();
@@ -123,15 +123,15 @@ impl CameraDevice for AndroidCamera {
         let capabilities = CameraCapabilities {
             supported_resolutions: vec![],
             supported_frame_rates: vec![],
-            supported_formats:     vec![],
+            supported_formats: vec![],
             has_torch: false,
-            has_zoom:  false,
+            has_zoom: false,
         };
 
         Ok(Self {
-            session:      Mutex::new(session),
-            frame_rx:     tokio::sync::Mutex::new(frame_rx),
-            recording:    Mutex::new(None),
+            session: Mutex::new(session),
+            frame_rx: tokio::sync::Mutex::new(frame_rx),
+            recording: Mutex::new(None),
             capabilities,
             config,
         })
@@ -160,13 +160,7 @@ impl CameraDevice for AndroidCamera {
         // Skip the first few frames to let auto-exposure settle.
         for _ in 0..10usize {
             let frame = rx.recv().await.ok_or(CameraError::StreamNotActive)?;
-            let avg_lum: f32 = frame
-                .data
-                .iter()
-                .take(256)
-                .map(|&b| b as f32)
-                .sum::<f32>()
-                / 256.0;
+            let avg_lum: f32 = frame.data.iter().take(256).map(|&b| b as f32).sum::<f32>() / 256.0;
             if avg_lum > 1.0 {
                 return Ok(frame);
             }
@@ -234,7 +228,11 @@ impl CameraDevice for AndroidCamera {
             .take()
             .ok_or(CameraError::NotRecording)?;
 
-        let ActiveRecording { recorder, extra_output, extra_target } = active;
+        let ActiveRecording {
+            recorder,
+            extra_output,
+            extra_target,
+        } = active;
 
         let recorder_surface = recorder.input_surface();
 
@@ -253,12 +251,16 @@ impl CameraDevice for AndroidCamera {
             let tmp = std::env::temp_dir();
             output_path.starts_with(&tmp)
         } {
-            let data = std::fs::read(&output_path)
-                .map_err(|e| CameraError::Backend(e.to_string()))?;
+            let data =
+                std::fs::read(&output_path).map_err(|e| CameraError::Backend(e.to_string()))?;
             std::fs::remove_file(&output_path).ok();
-            Ok(VideoData { kind: VideoOutput::Buffer(data) })
+            Ok(VideoData {
+                kind: VideoOutput::Buffer(data),
+            })
         } else {
-            Ok(VideoData { kind: VideoOutput::File(output_path) })
+            Ok(VideoData {
+                kind: VideoOutput::File(output_path),
+            })
         }
     }
 
@@ -286,11 +288,8 @@ impl CameraDevice for AndroidCamera {
             let recorder_surface = active.recorder.input_surface();
             let _ = active.recorder.stop();
             if let Ok(mut guard) = self.session.lock() {
-                let _ = guard.remove_output(
-                    active.extra_output,
-                    active.extra_target,
-                    recorder_surface,
-                );
+                let _ =
+                    guard.remove_output(active.extra_output, active.extra_target, recorder_surface);
             }
         }
 

@@ -39,25 +39,22 @@ impl WebRecorder {
         opts.set_mime_type("video/webm");
 
         let recorder =
-            web_sys::MediaRecorder::new_with_media_stream_and_media_recorder_options(
-                stream, &opts,
-            )
-            .or_else(|_| web_sys::MediaRecorder::new_with_media_stream(stream))
-            .map_err(|e| CameraError::Backend(js_err(e)))?;
+            web_sys::MediaRecorder::new_with_media_stream_and_media_recorder_options(stream, &opts)
+                .or_else(|_| web_sys::MediaRecorder::new_with_media_stream(stream))
+                .map_err(|e| CameraError::Backend(js_err(e)))?;
 
         let chunks: Rc<RefCell<Vec<web_sys::Blob>>> = Rc::new(RefCell::new(Vec::new()));
         let chunks_clone = chunks.clone();
 
         // Collect Blob segments as they arrive.
-        let on_data = Closure::<dyn FnMut(web_sys::BlobEvent)>::new(
-            move |event: web_sys::BlobEvent| {
+        let on_data =
+            Closure::<dyn FnMut(web_sys::BlobEvent)>::new(move |event: web_sys::BlobEvent| {
                 if let Some(blob) = event.data() {
                     if blob.size() > 0.0 {
                         chunks_clone.borrow_mut().push(blob);
                     }
                 }
-            },
-        );
+            });
         recorder.set_ondataavailable(Some(on_data.as_ref().unchecked_ref()));
         // `forget` keeps the closure alive for the recording session. This is
         // acceptable because recording sessions are finite and page-bounded.

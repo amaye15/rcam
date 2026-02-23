@@ -9,11 +9,11 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
+use crate::traits::CameraDevice;
 use crate::{
     CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, RecordingOutput, VideoData,
     VideoOutput,
 };
-use crate::traits::CameraDevice;
 
 use recorder::AvfRecorder;
 use session::AvfSession;
@@ -177,12 +177,16 @@ impl CameraDevice for AvfCamera {
         }
 
         if is_temp {
-            let data = std::fs::read(&output_path)
-                .map_err(|e| CameraError::Backend(e.to_string()))?;
+            let data =
+                std::fs::read(&output_path).map_err(|e| CameraError::Backend(e.to_string()))?;
             std::fs::remove_file(&output_path).ok();
-            Ok(VideoData { kind: VideoOutput::Buffer(data) })
+            Ok(VideoData {
+                kind: VideoOutput::Buffer(data),
+            })
         } else {
-            Ok(VideoData { kind: VideoOutput::File(output_path) })
+            Ok(VideoData {
+                kind: VideoOutput::File(output_path),
+            })
         }
     }
 
@@ -201,7 +205,12 @@ impl CameraDevice for AvfCamera {
     where
         Self: Sized,
     {
-        let Self { session, frame_rx: _, recording, capabilities: _ } = self;
+        let Self {
+            session,
+            frame_rx: _,
+            recording,
+            capabilities: _,
+        } = self;
 
         // Stop any active recording gracefully.
         if let Some(rec) = recording.into_inner().unwrap() {

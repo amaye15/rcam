@@ -32,7 +32,10 @@ impl Default for CameraConfig {
     fn default() -> Self {
         Self {
             device_id: None,
-            resolution: Resolution { width: 1280, height: 720 },
+            resolution: Resolution {
+                width: 1280,
+                height: 720,
+            },
             frame_rate: 30,
             format: FrameFormat::NV12,
             position: CameraPosition::Unknown,
@@ -140,15 +143,13 @@ impl Frame {
         let h = self.height;
 
         match self.format {
-            FrameFormat::RGB24 => {
-                ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, self.data.clone())
-                    .map(DynamicImage::ImageRgb8)
-                    .ok_or_else(|| {
-                        crate::CameraError::Backend(
-                            "RGB24 buffer size does not match declared dimensions".into(),
-                        )
-                    })
-            }
+            FrameFormat::RGB24 => ImageBuffer::<Rgb<u8>, _>::from_raw(w, h, self.data.clone())
+                .map(DynamicImage::ImageRgb8)
+                .ok_or_else(|| {
+                    crate::CameraError::Backend(
+                        "RGB24 buffer size does not match declared dimensions".into(),
+                    )
+                }),
             FrameFormat::BGRA => {
                 // BGRA → RGBA channel reorder.
                 let rgba: Vec<u8> = self
@@ -187,17 +188,15 @@ fn yuv_to_rgb(y: u8, u: u8, v: u8) -> [u8; 3] {
 
 /// Convert planar I420 (YUV 4:2:0) to an RGB image.
 #[cfg(feature = "image-output")]
-fn yuv420_to_image(
-    w: u32,
-    h: u32,
-    data: &[u8],
-) -> Result<image::DynamicImage, crate::CameraError> {
+fn yuv420_to_image(w: u32, h: u32, data: &[u8]) -> Result<image::DynamicImage, crate::CameraError> {
     use image::{DynamicImage, ImageBuffer, Rgb};
 
     let y_size = (w * h) as usize;
     let uv_size = (w as usize / 2) * (h as usize / 2);
     if data.len() < y_size + 2 * uv_size {
-        return Err(crate::CameraError::Backend("YUV420 buffer too small".into()));
+        return Err(crate::CameraError::Backend(
+            "YUV420 buffer too small".into(),
+        ));
     }
     let y_plane = &data[..y_size];
     let u_plane = &data[y_size..y_size + uv_size];
@@ -223,11 +222,7 @@ fn yuv420_to_image(
 
 /// Convert semi-planar NV12 (Y + interleaved UV) to an RGB image.
 #[cfg(feature = "image-output")]
-fn nv12_to_image(
-    w: u32,
-    h: u32,
-    data: &[u8],
-) -> Result<image::DynamicImage, crate::CameraError> {
+fn nv12_to_image(w: u32, h: u32, data: &[u8]) -> Result<image::DynamicImage, crate::CameraError> {
     use image::{DynamicImage, ImageBuffer, Rgb};
 
     let y_size = (w * h) as usize;
