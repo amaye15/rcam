@@ -14,10 +14,12 @@
 //!
 //! # Threading
 //!
-//! WinRT `IAsyncOperation<T>` does not implement `std::future::Future` in all
-//! windows-rs configurations. We resolve async operations synchronously via the
-//! `capture::wrt_get` / `wrt_action` spin-wait helpers inside
-//! `tokio::task::spawn_blocking`, which avoids blocking the async executor.
+//! WinRT COM objects in windows-rs do not implement `Send` even for agile
+//! (free-threaded) classes. We use `SendWrapper<T>` to assert thread safety
+//! where the underlying WinRT type implements `IAgileObject`. All blocking
+//! WinRT calls run inside `tokio::task::spawn_blocking` using synchronous
+//! spin-wait helpers (`wrt_get` / `wrt_action`) that replace `.await` on
+//! WinRT `IAsyncOperation<T>` / `IAsyncAction` values.
 
 pub mod capture;
 
@@ -44,7 +46,33 @@ use crate::{
 use capture::wrt_get;
 
 // ---------------------------------------------------------------------------
-// Synchronous IAsyncAction helper
+// SendWrapper — thin newtype that asserts T is safe to send across threads
+// ---------------------------------------------------------------------------
+
+/// Marks a WinRT COM object as `Send + Sync`.
+///
+/// SAFETY: The wrapped type must implement `IAgileObject` (WinRT free-threaded
+/// marshal), guaranteeing safe use from any thread. All mutable state is
+/// additionally protected by the `Mutex` in `MfCamera`.
+struct SendWrapper<T>(T);
+unsafe impl<T> Send for SendWrapper<T> {}
+unsafe impl<T> Sync for SendWrapper<T> {}
+
+impl<T: Clone> Clone for SendWrapper<T> {
+    fn clone(&self) -> Self {
+        SendWrapper(self.0.clone())
+    }
+}
+
+impl<T> std::ops::Deref for SendWrapper<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Synchronous WinRT async helpers
 // ---------------------------------------------------------------------------
 
 fn wrt_action(op: IAsyncAction) -> windows::core::Result<()> {
@@ -54,7 +82,6 @@ fn wrt_action(op: IAsyncAction) -> windows::core::Result<()> {
             return Ok(());
         }
         if status != AsyncStatus::Started {
-            // Error or Canceled — get error HRESULT from the operation.
             return Err(windows::core::Error::from(op.ErrorCode()?));
         }
         std::hint::spin_loop();
@@ -63,8 +90,6 @@ fn wrt_action(op: IAsyncAction) -> windows::core::Result<()> {
 
 /// Wait on any WinRT async operation that exposes `IAsyncInfo` but is not
 /// an `IAsyncOperation<T>` (e.g. `DataReaderLoadOperation`).
-///
-/// Returns `Ok(())` on completion. Does not retrieve a result value.
 fn wrt_wait<T: Interface>(op: &T) -> windows::core::Result<()> {
     let info: IAsyncInfo = op.cast()?;
     loop {
@@ -80,41 +105,29 @@ fn wrt_wait<T: Interface>(op: &T) -> windows::core::Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// SendLowLag — thin wrapper so LowLagMediaRecording crosses spawn_blocking
-// ---------------------------------------------------------------------------
-
-/// Newtype that asserts `LowLagMediaRecording` is safe to send across threads.
-///
-/// SAFETY: WinRT `LowLagMediaRecording` implements `IAgileObject` and is
-/// therefore safe to use from multiple threads. The `Mutex` in `MfCamera`
-/// serialises all accesses to the active recording.
-struct SendLowLag(LowLagMediaRecording);
-unsafe impl Send for SendLowLag {}
-
-// ---------------------------------------------------------------------------
 // MfCamera
 // ---------------------------------------------------------------------------
 
 /// Windows Media Foundation camera handle.
 pub struct MfCamera {
-    /// Initialised MediaCapture instance for the chosen device.
-    capture: MediaCapture,
+    /// Initialised `MediaCapture` instance (wrapped for cross-thread safety).
+    capture: SendWrapper<MediaCapture>,
     /// Cached resolution from config, used when building `Frame` metadata.
     resolution: Resolution,
-    /// Active `LowLagMediaRecording` session while recording, plus whether the
-    /// output should be read back into a buffer after finishing.
+    /// Active `LowLagMediaRecording` session while recording.
     recording: Mutex<Option<ActiveRecording>>,
     capabilities: CameraCapabilities,
 }
 
 struct ActiveRecording {
-    session: SendLowLag,
+    /// Session wrapped for cross-thread safety (passed into spawn_blocking).
+    session: SendWrapper<LowLagMediaRecording>,
     output_path: PathBuf,
     is_temp: bool,
 }
 
-// SAFETY: WinRT `MediaCapture` implements `IAgileObject` and is safe to use
-// from multiple threads. The `Mutex` guards mutable recording state.
+// SAFETY: MfCamera's WinRT objects implement IAgileObject; Mutex guards
+// mutable recording state.
 unsafe impl Send for MfCamera {}
 unsafe impl Sync for MfCamera {}
 
@@ -161,7 +174,7 @@ impl CameraDevice for MfCamera {
             .map_err(|e| CameraError::Backend(e.to_string()))?;
 
             Ok(Self {
-                capture,
+                capture: SendWrapper(capture),
                 resolution: config.resolution,
                 recording: Mutex::new(None),
                 capabilities: CameraCapabilities {
@@ -197,15 +210,16 @@ impl CameraDevice for MfCamera {
     // -----------------------------------------------------------------------
 
     async fn take_photo(&self) -> Result<Frame, CameraError> {
+        // Clone the SendWrapper<MediaCapture> (Send) so it can cross thread boundary.
         let capture = self.capture.clone();
         let resolution = self.resolution.clone();
 
         tokio::task::spawn_blocking(move || {
-            // Encode to JPEG in-memory; most straightforward format to return as
-            // raw bytes without requiring an external decoder dependency.
+            // Encode to JPEG in-memory.
             let props = ImageEncodingProperties::CreateJpeg()
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
 
+            // Deref SendWrapper<MediaCapture> → &MediaCapture for method calls.
             let plpc: LowLagPhotoCapture = wrt_get(
                 capture
                     .PrepareLowLagPhotoCaptureAsync(&props)
@@ -227,8 +241,7 @@ impl CameraDevice for MfCamera {
             .map_err(|e| CameraError::Backend(e.to_string()))?;
 
             // CapturedFrame implements IRandomAccessStream and IInputStream.
-            // Use IRandomAccessStream to get the byte size, then DataReader to
-            // read the JPEG bytes via IInputStream.
+            // Cast to IRandomAccessStream for Size(), and to IInputStream for DataReader.
             let frame = photo
                 .Frame()
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
@@ -246,8 +259,8 @@ impl CameraDevice for MfCamera {
             let reader = DataReader::CreateDataReader(&input)
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            // LoadAsync returns DataReaderLoadOperation, not IAsyncOperation<T>,
-            // so use wrt_wait (IAsyncInfo-based) instead of wrt_get.
+            // LoadAsync returns DataReaderLoadOperation (not IAsyncOperation<T>),
+            // so use the IAsyncInfo-based wrt_wait helper.
             let load_op = reader
                 .LoadAsync(size)
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
@@ -289,17 +302,17 @@ impl CameraDevice for MfCamera {
             }
         };
 
+        // Clone the SendWrapper<MediaCapture> so it can cross the thread boundary.
         let capture = self.capture.clone();
         let path_clone = path.clone();
 
         let session = tokio::task::spawn_blocking(move || {
-            // Encode to MP4 / H.264 at Auto quality (device picks best).
             let profile = MediaEncodingProfile::CreateMp4(VideoEncodingQuality::Auto)
                 .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            // Open (or create) the output file via the Storage API.
             let output_file = open_or_create_storage_file_sync(&path_clone)?;
 
+            // Deref SendWrapper<MediaCapture> → &MediaCapture for the WinRT call.
             let session: LowLagMediaRecording = wrt_get(
                 capture
                     .PrepareLowLagRecordToStorageFileAsync(&profile, &output_file)
@@ -314,8 +327,8 @@ impl CameraDevice for MfCamera {
             )
             .map_err(|e| CameraError::Backend(e.to_string()))?;
 
-            // Wrap in SendLowLag so the value can cross the spawn_blocking boundary.
-            Ok::<SendLowLag, CameraError>(SendLowLag(session))
+            // Wrap in SendWrapper so the value can cross the spawn_blocking boundary.
+            Ok::<SendWrapper<LowLagMediaRecording>, CameraError>(SendWrapper(session))
         })
         .await
         .map_err(|e| CameraError::Backend(e.to_string()))??;
@@ -340,9 +353,8 @@ impl CameraDevice for MfCamera {
             .take()
             .ok_or(CameraError::NotRecording)?;
 
+        // session is SendWrapper<LowLagMediaRecording> (Send), safe to move into closure.
         tokio::task::spawn_blocking(move || {
-            let session = session.0;
-
             wrt_action(
                 session
                     .StopAsync()
@@ -392,8 +404,8 @@ impl CameraDevice for MfCamera {
     {
         // If recording was in progress, stop it gracefully (best-effort).
         if let Some(rec) = self.recording.into_inner().unwrap() {
-            let _ = rec.session.0.StopAsync();
-            let _ = rec.session.0.FinishAsync();
+            let _ = rec.session.StopAsync();
+            let _ = rec.session.FinishAsync();
         }
         // MediaCapture is released when dropped (COM reference counting).
         Ok(())
@@ -404,7 +416,6 @@ impl CameraDevice for MfCamera {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/// Returns the current time as microseconds since the Unix epoch.
 fn timestamp_us_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

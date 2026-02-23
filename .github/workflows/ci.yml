@@ -151,7 +151,9 @@ jobs:
         uses: browser-actions/setup-chrome@v1
 
       - name: Run WASM tests in headless Chrome
-        run: wasm-pack test --headless --chrome rcam/
+        # Use `-- --test wasm_tests` so cargo only compiles the wasm_tests
+        # integration test and the library, not the native-only examples.
+        run: wasm-pack test --headless --chrome rcam/ -- --test wasm_tests
 
   # -------------------------------------------------------------------------
   # Android — Camera2 NDK (check only in main CI; emulator job is separate)
