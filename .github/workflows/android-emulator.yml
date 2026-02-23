@@ -1,0 +1,150 @@
+# Android emulator integration tests.
+#
+# Runs the mock_camera and error_display test suites on an actual Android
+# x86_64 AVD using cargo-ndk and a custom adb runner.  The emulator's
+# virtual camera is not used — only the pure-Rust mock backend executes.
+#
+# This workflow is kept separate from ci.yml because emulator setup takes
+# 5–10 minutes and is only needed on Android-specific changes.
+
+name: Android emulator tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'rcam/src/backend/android/**'
+      - 'rcam-sys-android/**'
+      - '.github/workflows/android-emulator.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'rcam/src/backend/android/**'
+      - 'rcam-sys-android/**'
+      - '.github/workflows/android-emulator.yml'
+  workflow_dispatch:  # allow manual runs
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # Emulator API level must support x86_64 hardware acceleration.
+  AVD_API_LEVEL: 29
+
+jobs:
+  android-emulator:
+    name: Android AVD (API ${{ env.AVD_API_LEVEL }}, x86_64)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ------------------------------------------------------------------
+      # Rust toolchain + Android target
+      # ------------------------------------------------------------------
+      - name: Install Rust stable + x86_64-linux-android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-linux-android
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      # ------------------------------------------------------------------
+      # Android SDK / NDK
+      # ------------------------------------------------------------------
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Install Android NDK r27c
+        id: setup-ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r27c
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      # ------------------------------------------------------------------
+      # Build test binaries for x86_64-linux-android
+      # ------------------------------------------------------------------
+      - name: Build mock_camera test binary (no-run)
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cargo test -p rcam --test mock_camera \
+            --target x86_64-linux-android --no-run 2>&1
+
+      - name: Build error_display test binary (no-run)
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: |
+          cargo test -p rcam --test error_display \
+            --target x86_64-linux-android --no-run 2>&1
+
+      # ------------------------------------------------------------------
+      # Create the adb runner script
+      # ------------------------------------------------------------------
+      - name: Write adb test runner
+        run: |
+          mkdir -p target
+          cat > target/android_test_runner.sh << 'SH'
+          #!/usr/bin/env bash
+          # Usage: android_test_runner.sh <binary> [args...]
+          set -euo pipefail
+          BIN="$1"; shift
+          REMOTE=/data/local/tmp/$(basename "$BIN")
+          adb wait-for-device
+          adb push "$BIN" "$REMOTE"
+          adb shell chmod +x "$REMOTE"
+          # Pass through test filter args.
+          adb shell "$REMOTE" "$@"
+          STATUS=$?
+          adb shell rm -f "$REMOTE"
+          exit $STATUS
+          SH
+          chmod +x target/android_test_runner.sh
+
+      # ------------------------------------------------------------------
+      # Boot the Android emulator
+      # ------------------------------------------------------------------
+      - name: Enable KVM (hardware acceleration)
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run tests on Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ env.AVD_API_LEVEL }}
+          arch: x86_64
+          target: default
+          profile: Nexus 6
+          avd-name: rcam_test_avd
+          force-avd-creation: false
+          emulator-options: >-
+            -no-snapshot-save
+            -no-window
+            -gpu swiftshader_indirect
+            -noaudio
+            -no-boot-anim
+          disable-animations: true
+          script: |
+            echo "--- Emulator booted ---"
+            adb devices
+
+            # Locate the test binaries built above.
+            MOCK_BIN=$(find target/x86_64-linux-android/debug/deps \
+              -name 'mock_camera-*' -executable ! -name '*.d' | head -1)
+            ERR_BIN=$(find target/x86_64-linux-android/debug/deps \
+              -name 'error_display-*' -executable ! -name '*.d' | head -1)
+
+            echo "Running mock_camera tests on AVD..."
+            target/android_test_runner.sh "$MOCK_BIN"
+
+            echo "Running error_display tests on AVD..."
+            target/android_test_runner.sh "$ERR_BIN"

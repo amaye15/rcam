@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 keywords = ["camera", "video", "capture", "cross-platform", "wasm"]
 categories = ["multimedia::video", "hardware-support"]
+readme = "README.md"
 
 # ---------------------------------------------------------------------------
 # Features — backend-* are organisational markers; platform deps are always
@@ -32,6 +33,7 @@ image-output    = ["dep:image"]
 [dependencies]
 async-trait = { workspace = true }
 thiserror   = { workspace = true }
+tokio       = { version = "1", features = ["sync", "rt"] }
 
 serde       = { version = "1", features = ["derive"], optional = true }
 image       = { version = "0.25", optional = true }
@@ -41,20 +43,33 @@ ffmpeg-next = { version = "7", optional = true }
 # macOS + iOS — AVFoundation
 # ---------------------------------------------------------------------------
 [target.'cfg(any(target_os = "ios", target_os = "macos"))'.dependencies]
-objc2 = "0.5"
+objc2 = "0.6"
+block2 = "0.6"
+dispatch2 = "0.3"
 objc2-av-foundation = { version = "0.3", features = [
     "AVCaptureSession",
     "AVCaptureDevice",
     "AVCaptureInput",          # base class; includes AVCaptureDeviceInput
+    "AVCaptureOutputBase",     # base class; includes AVCaptureOutput
     "AVCaptureVideoDataOutput",
     "AVCapturePhotoOutput",
     "AVAssetWriter",
     "AVAssetWriterInput",
-    "AVCaptureFileOutput",     # base class; includes AVCaptureMovieFileOutput
+    "AVCaptureFileOutput",     # includes AVCaptureMovieFileOutput + recording delegate
+    "AVMediaFormat",           # AVMediaType, AVMediaTypeVideo
+    "dispatch2",               # enables setSampleBufferDelegate:queue:
 ]}
 objc2-foundation = "0.3"
-objc2-core-media = "0.3"
-objc2-core-video = "0.3"
+objc2-core-media = { version = "0.3", features = [
+    "objc2-core-video",        # enables CMSampleBuffer::image_buffer()
+]}
+objc2-core-video = { version = "0.3", features = [
+    "CVBase",                  # CVPixelBufferLockFlags bitflags
+    "CVBuffer",                # CVBuffer struct
+    "CVImageBuffer",           # CVImageBuffer type alias
+    "CVReturn",                # CVReturn for lock/unlock return value
+    "CVPixelBuffer",           # CVPixelBuffer type alias + functions
+]}
 
 # ---------------------------------------------------------------------------
 # Android — Camera2 NDK
@@ -75,10 +90,13 @@ v4l = "0.14"
 [target.'cfg(target_os = "windows")'.dependencies.windows]
 version = "0.58"
 features = [
+    "Foundation",
+    "Foundation_Collections",
+    "Devices_Enumeration",
     "Media_Capture",
     "Media_MediaProperties",
-    "Devices_Enumeration",
-    "Foundation_Collections",
+    "Storage",
+    "Storage_Streams",
 ]
 
 # ---------------------------------------------------------------------------
@@ -92,22 +110,65 @@ js-sys               = "0.3"
 [target.'cfg(target_arch = "wasm32")'.dependencies.web-sys]
 version = "0.3"
 features = [
+    # Devices / permissions
     "MediaDevices",
+    "MediaDeviceInfo",
+    "InputDeviceInfo",
     "MediaStream",
     "MediaStreamConstraints",
+    "MediaStreamTrack",
+    "MediaTrackConstraints",
+    # Recording
     "MediaRecorder",
     "MediaRecorderOptions",
     "BlobEvent",
+    "Blob",
+    # Still capture
     "ImageCapture",
-    "MediaStreamTrack",
+    # Frame capture via canvas
     "Navigator",
     "Window",
+    "Document",
+    "Element",
+    "EventTarget",
+    "HtmlMediaElement",
     "HtmlVideoElement",
-    "InputDeviceInfo",
+    "HtmlCanvasElement",
+    "CanvasRenderingContext2d",
+    "ImageData",
 ]
 
 [dev-dependencies]
-tokio = { version = "1", features = ["full"] }
+tokio        = { version = "1", features = ["full"] }
+serde_json   = "1"
+# WASM-only test harness (inactive on native targets).
+wasm-bindgen-test = "0.3"
+
+# ---------------------------------------------------------------------------
+# Named test targets — some require optional features to compile.
+# ---------------------------------------------------------------------------
+
+[[test]]
+name = "mock_camera"
+
+[[test]]
+name = "error_display"
+
+[[test]]
+name = "image_output"
+required-features = ["image-output"]
+
+[[test]]
+name = "serde_roundtrips"
+required-features = ["serde"]
+
+# wasm_tests: compiled only when targeting wasm32 (file uses #![cfg(target_arch = "wasm32")]).
+[[test]]
+name = "wasm_tests"
+
+# v4l2_device: compiled only on Linux (file uses #![cfg(target_os = "linux")]).
+[[test]]
+name = "v4l2_device"
 
 [[example]]
 name = "list_devices"

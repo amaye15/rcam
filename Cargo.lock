@@ -209,7 +209,7 @@ version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cdeb9d870516001442e364c5220d3574d2da8dc765554b4a617230d33fa58ef5"
 dependencies = [
- "objc2 0.6.3",
+ "objc2",
 ]
 
 [[package]]
@@ -241,6 +241,12 @@ name = "bytes"
 version = "1.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e748733b7cbc798e1434b6ac524f0c1ff2ab456fe201501e6497c8417a4fc33"
+
+[[package]]
+name = "cast"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
@@ -359,7 +365,8 @@ checksum = "89a09f22a6c6069a18470eb92d2298acf25463f14256d24778e1230d789a2aec"
 dependencies = [
  "bitflags 2.11.0",
  "block2",
- "objc2 0.6.3",
+ "libc",
+ "objc2",
 ]
 
 [[package]]
@@ -631,6 +638,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "itoa"
+version = "1.0.17"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "92ecc6618181def0457392ccd0ee51198e065e016d1d527a7ac1b6dc7c1f09d2"
+
+[[package]]
 name = "jni"
 version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -717,6 +730,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "libm"
+version = "0.2.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.4.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -761,6 +780,16 @@ name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
+
+[[package]]
+name = "minicov"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4869b6a491569605d66d3952bcdf03df789e5b536e5f0cf7758a7f08a55ae24d"
+dependencies = [
+ "cc",
+ "walkdir",
+]
 
 [[package]]
 name = "minimal-lexical"
@@ -831,6 +860,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0676bb32a98c1a483ce53e500a81ad9c3d5b3f7c920c28c24e9cb0980d0b5bc8"
 
 [[package]]
+name = "nu-ansi-term"
+version = "0.50.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
+dependencies = [
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "num-bigint"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -878,6 +916,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -888,22 +927,6 @@ checksum = "91df4bbde75afed763b708b7eee1e8e7651e02d97f6d5dd763e89367e957b23b"
 dependencies = [
  "hermit-abi",
  "libc",
-]
-
-[[package]]
-name = "objc-sys"
-version = "0.3.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cdb91bdd390c7ce1a8607f35f3ca7151b65afc0ff5ff3b34fa350f7d7c7e4310"
-
-[[package]]
-name = "objc2"
-version = "0.5.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "46a785d4eeff09c14c487497c162e92766fbb3e4059a71840cecc03d9a50b804"
-dependencies = [
- "objc-sys",
- "objc2-encode",
 ]
 
 [[package]]
@@ -924,7 +947,7 @@ dependencies = [
  "bitflags 2.11.0",
  "block2",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2",
  "objc2-avf-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -943,7 +966,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "13a380031deed8e99db00065c45937da434ca987c034e13b87e4441f9e4090be"
 dependencies = [
- "objc2 0.6.3",
+ "objc2",
  "objc2-foundation",
 ]
 
@@ -954,7 +977,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e1eebcea8b0dbff5f7c8504f3107c68fc061a3eb44932051c8cf8a68d969c3b2"
 dependencies = [
  "dispatch2",
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-audio-types",
  "objc2-core-foundation",
 ]
@@ -966,7 +989,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5a89f2ec274a0cf4a32642b2991e8b351a404d290da87bb6a9a9d8632490bd1c"
 dependencies = [
  "bitflags 2.11.0",
- "objc2 0.6.3",
+ "objc2",
 ]
 
 [[package]]
@@ -977,7 +1000,7 @@ checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
 dependencies = [
  "bitflags 2.11.0",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2",
 ]
 
 [[package]]
@@ -988,7 +1011,7 @@ checksum = "e022c9d066895efa1345f8e33e584b9f958da2fd4cd116792e15e07e4720a807"
 dependencies = [
  "bitflags 2.11.0",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-foundation",
  "objc2-io-surface",
 ]
@@ -999,7 +1022,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5d563b38d2b97209f8e861173de434bd0214cf020e3423a52624cd1d989f006"
 dependencies = [
- "objc2 0.6.3",
+ "objc2",
  "objc2-foundation",
 ]
 
@@ -1012,7 +1035,7 @@ dependencies = [
  "bitflags 2.11.0",
  "block2",
  "dispatch2",
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-audio",
  "objc2-core-audio-types",
  "objc2-core-foundation",
@@ -1027,7 +1050,7 @@ checksum = "d425caf1df73233f29fd8a5c3e5edbc30d2d4307870f802d18f00d83dc5141a6"
 dependencies = [
  "bitflags 2.11.0",
  "block2",
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
  "objc2-io-surface",
@@ -1049,7 +1072,7 @@ dependencies = [
  "bitflags 2.11.0",
  "block2",
  "libc",
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-foundation",
 ]
 
@@ -1059,7 +1082,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32b0446e98cf4a784cc7a0177715ff317eeaa8463841c616cfc78aa4f953c4ea"
 dependencies = [
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-foundation",
  "objc2-core-graphics",
 ]
@@ -1071,7 +1094,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "180788110936d59bab6bd83b6060ffdfffb3b922ba1396b312ae795e1de9d81d"
 dependencies = [
  "bitflags 2.11.0",
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-foundation",
 ]
 
@@ -1081,7 +1104,7 @@ version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "edd9fdde720df3da7046bb9097811000c1e7ab5cd579fa89d96b27d56781fb30"
 dependencies = [
- "objc2 0.6.3",
+ "objc2",
  "objc2-core-audio-types",
  "objc2-core-foundation",
  "objc2-core-media",
@@ -1094,7 +1117,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a0125f776a10d00af4152d74616409f0d4a2053a6f57fa5b7d6aa2854ac04794"
 dependencies = [
  "bitflags 2.11.0",
- "objc2 0.6.3",
+ "objc2",
  "objc2-foundation",
 ]
 
@@ -1105,7 +1128,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "96c1358452b371bf9f104e21ec536d37a650eb10f7ee379fff67d2e08d537f1f"
 dependencies = [
  "bitflags 2.11.0",
- "objc2 0.6.3",
+ "objc2",
  "objc2-foundation",
 ]
 
@@ -1114,6 +1137,12 @@ name = "once_cell"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
+
+[[package]]
+name = "oorandom"
+version = "11.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "parking_lot"
@@ -1371,22 +1400,26 @@ name = "rcam"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "block2",
+ "dispatch2",
  "ffmpeg-next",
  "image",
  "jni",
  "js-sys",
- "objc2 0.5.2",
+ "objc2",
  "objc2-av-foundation",
  "objc2-core-media",
  "objc2-core-video",
  "objc2-foundation",
  "rcam-sys-android",
  "serde",
+ "serde_json",
  "thiserror 2.0.18",
  "tokio",
  "v4l",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-test",
  "web-sys",
  "windows",
 ]
@@ -1510,6 +1543,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "serde_json"
+version = "1.0.149"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+dependencies = [
+ "itoa",
+ "memchr",
+ "serde",
+ "serde_core",
+ "zmij",
 ]
 
 [[package]]
@@ -1790,6 +1836,45 @@ checksum = "60eecd4fe26177cfa3339eb00b4a36445889ba3ad37080c2429879718e20ca41"
 dependencies = [
  "unicode-ident",
 ]
+
+[[package]]
+name = "wasm-bindgen-test"
+version = "0.3.61"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f9483e929b4ae6889bc7c62b314abda7d0bd286a8d82b21235855d5327e4eb4"
+dependencies = [
+ "async-trait",
+ "cast",
+ "js-sys",
+ "libm",
+ "minicov",
+ "nu-ansi-term",
+ "num-traits",
+ "oorandom",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test-macro",
+ "wasm-bindgen-test-shared",
+]
+
+[[package]]
+name = "wasm-bindgen-test-macro"
+version = "0.3.61"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30f8b972c5c33f97917c9f418535f3175e464d48db15f5226d124c648a1b4036"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "wasm-bindgen-test-shared"
+version = "0.2.111"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0000397743a3b549ddba01befd1a26020eff98a028429630281c4203b4cc538d"
 
 [[package]]
 name = "web-sys"
@@ -2151,6 +2236,12 @@ dependencies = [
  "quote",
  "syn",
 ]
+
+[[package]]
+name = "zmij"
+version = "1.0.21"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
 
 [[package]]
 name = "zune-core"

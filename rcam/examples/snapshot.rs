@@ -1,41 +1,52 @@
-//! Example: open the default camera and save a single photo to disk.
+//! Capture a single still image and save it to `snapshot.png`.
 //!
 //! Run with:
-//!   cargo run --example snapshot -- [output_path]
+//! ```
+//! cargo run --example snapshot --features image-output
+//! ```
 //!
-//! The output path defaults to `snapshot.png`. Requires the `image-output`
-//! feature to be enabled (`--features image-output`) for PNG encoding.
+//! The `image-output` feature is required for saving the frame as PNG.
 
-use std::env;
 use std::path::PathBuf;
 
-use rcam::{Camera, CameraConfig, CameraDevice};
+use rcam::{CameraConfig, CameraDevice};
 
 #[tokio::main]
-async fn main() {
-    let output: PathBuf = env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("snapshot.bgra"));
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Open the default camera at 720p.
+    let config = CameraConfig::default();
+    let mut camera = rcam::Camera::open(config).await?;
 
-    println!("Opening default camera…");
-    let cam = Camera::open(CameraConfig::default())
-        .await
-        .expect("Failed to open camera");
+    camera.start_stream().await?;
 
-    println!("Taking photo…");
-    let frame = cam.take_photo().await.expect("Failed to take photo");
-
+    println!("Capturing frame…");
+    let frame = camera.take_photo().await?;
     println!(
-        "Captured {}×{} frame ({:?}, {} bytes)",
+        "Got frame: {}×{} {:?} ({} bytes)",
         frame.width,
         frame.height,
         frame.format,
         frame.data.len()
     );
 
-    std::fs::write(&output, &frame.data).expect("Failed to write output file");
-    println!("Saved raw pixel data to {}", output.display());
+    #[cfg(feature = "image-output")]
+    {
+        let img = frame.to_image()?;
+        let out = PathBuf::from("snapshot.png");
+        img.save(&out)?;
+        println!("Saved {}", out.display());
+    }
 
-    cam.close().await.expect("Failed to close camera");
+    #[cfg(not(feature = "image-output"))]
+    {
+        // Without image-output, write raw bytes to disk.
+        let out = PathBuf::from("snapshot.raw");
+        std::fs::write(&out, &frame.data)?;
+        println!("Saved raw frame to {} ({} bytes)", out.display(), frame.data.len());
+    }
+
+    camera.stop_stream().await?;
+    camera.close().await?;
+
+    Ok(())
 }

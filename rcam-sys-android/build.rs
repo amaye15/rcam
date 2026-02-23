@@ -23,7 +23,9 @@ fn main() {
     };
 
     let sysroot = format!("{ndk}/toolchains/llvm/prebuilt/{host}/sysroot");
-    let include = format!("{sysroot}/usr/include");
+    let _include = format!("{sysroot}/usr/include");
+    #[cfg(feature = "bindgen")]
+    let include = _include.clone();
 
     // Link the required NDK shared libraries.
     println!("cargo:rustc-link-lib=camera2ndk");

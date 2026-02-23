@@ -20,6 +20,8 @@ struct MockCamera {
     capabilities: CameraCapabilities,
     streaming: bool,
     recording: bool,
+    /// Tracks what output the caller requested so stop_recording returns the right variant.
+    recording_output: Option<RecordingOutput>,
 }
 
 impl MockCamera {
@@ -37,6 +39,7 @@ impl MockCamera {
             },
             streaming: false,
             recording: false,
+            recording_output: None,
         }
     }
 
@@ -101,8 +104,9 @@ impl CameraDevice for MockCamera {
         Ok(MockCamera::synth_frame())
     }
 
-    async fn start_recording(&mut self, _output: RecordingOutput) -> Result<(), CameraError> {
+    async fn start_recording(&mut self, output: RecordingOutput) -> Result<(), CameraError> {
         self.recording = true;
+        self.recording_output = Some(output);
         Ok(())
     }
 
@@ -111,8 +115,12 @@ impl CameraDevice for MockCamera {
             return Err(CameraError::NotRecording);
         }
         self.recording = false;
-        // Return a minimal synthetic MP4-like buffer.
-        Ok(VideoData { kind: VideoOutput::Buffer(vec![0u8; 128]) })
+        let kind = match self.recording_output.take() {
+            Some(RecordingOutput::File(p)) => VideoOutput::File(p),
+            // Buffer or None → return a minimal synthetic MP4-like payload.
+            _ => VideoOutput::Buffer(vec![0u8; 128]),
+        };
+        Ok(VideoData { kind })
     }
 
     async fn stop_stream(&mut self) -> Result<(), CameraError> {
@@ -202,7 +210,98 @@ async fn test_capabilities() {
 async fn test_file_recording_output() {
     let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
     let path = PathBuf::from("/tmp/rcam_test_output.mp4");
-    cam.start_recording(RecordingOutput::File(path)).await.unwrap();
-    let _ = cam.stop_recording().await.unwrap();
+    cam.start_recording(RecordingOutput::File(path.clone())).await.unwrap();
+    let video = cam.stop_recording().await.unwrap();
+    // The mock now returns the File variant when given RecordingOutput::File.
+    assert!(matches!(video.kind, VideoOutput::File(_)));
+    if let VideoOutput::File(p) = video.kind {
+        assert_eq!(p, path);
+    }
+    cam.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_double_stop_recording_returns_error() {
+    let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
+    cam.start_recording(RecordingOutput::Buffer).await.unwrap();
+    cam.stop_recording().await.unwrap();
+    // Second stop with no active recording must fail.
+    assert!(matches!(cam.stop_recording().await, Err(CameraError::NotRecording)));
+    cam.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_capture_multiple_frames_in_sequence() {
+    let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
+    cam.start_stream().await.unwrap();
+    for _ in 0..5 {
+        let frame = cam.capture_frame().await.unwrap();
+        assert_eq!(frame.width, 640);
+        assert_eq!(frame.height, 480);
+    }
+    cam.stop_stream().await.unwrap();
+    cam.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_frame_data_size_matches_dimensions() {
+    let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
+    cam.start_stream().await.unwrap();
+    let frame = cam.capture_frame().await.unwrap();
+    // BGRA = 4 bytes per pixel.
+    assert_eq!(frame.data.len() as u32, frame.width * frame.height * 4);
+    cam.stop_stream().await.unwrap();
+    cam.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_enumerate_device_positions() {
+    let devices = MockCamera::enumerate().await.unwrap();
+    let has_front = devices.iter().any(|d| d.position == CameraPosition::Front);
+    let has_back = devices.iter().any(|d| d.position == CameraPosition::Back);
+    assert!(has_front, "expected a front camera");
+    assert!(has_back, "expected a back camera");
+}
+
+#[tokio::test]
+async fn test_enumerate_exactly_one_default() {
+    let devices = MockCamera::enumerate().await.unwrap();
+    let default_count = devices.iter().filter(|d| d.is_default).count();
+    assert_eq!(default_count, 1, "exactly one device should be the default");
+}
+
+#[tokio::test]
+async fn test_config_default_resolution() {
+    let config = CameraConfig::default();
+    assert_eq!(config.resolution.width, 1280);
+    assert_eq!(config.resolution.height, 720);
+    assert_eq!(config.frame_rate, 30);
+    assert!(config.device_id.is_none());
+}
+
+#[tokio::test]
+async fn test_capabilities_contain_expected_formats() {
+    let cam = MockCamera::open(CameraConfig::default()).await.unwrap();
+    let caps = cam.capabilities();
+    assert!(caps.supported_formats.contains(&FrameFormat::BGRA));
+    assert!(caps.supported_formats.contains(&FrameFormat::NV12));
+    cam.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_stop_stream_before_start_is_ok() {
+    // stop_stream on a never-started stream must not panic or return an error.
+    let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
+    cam.stop_stream().await.unwrap();
+    cam.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_take_photo_returns_bgra_format() {
+    let cam = MockCamera::open(CameraConfig::default()).await.unwrap();
+    let photo = cam.take_photo().await.unwrap();
+    assert_eq!(photo.format, FrameFormat::BGRA);
+    assert_eq!(photo.width, 640);
+    assert_eq!(photo.height, 480);
     cam.close().await.unwrap();
 }

@@ -22,6 +22,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
@@ -32,11 +34,30 @@ jobs:
       - name: Build (Linux)
         run: cargo build -p rcam
 
-      - name: Run mock backend tests
-        run: cargo test -p rcam mock_camera
+      - name: Run mock + error tests
+        run: cargo test -p rcam --test mock_camera --test error_display
 
-      - name: Clippy
+      - name: Run optional-feature tests
+        run: cargo test -p rcam --test image_output --test serde_roundtrips --features serde,image-output
+
+      # Load v4l2loopback and run the ignored V4L2 device smoke tests.
+      - name: Install v4l2loopback
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends v4l2loopback-dkms
+          sudo modprobe v4l2loopback devices=1 video_nr=0 \
+            card_label="Virtual Camera" exclusive_caps=1
+          ls /dev/video* || echo "no video device; tests will self-skip"
+
+      - name: Run V4L2 device smoke tests
+        run: cargo test -p rcam --test v4l2_device -- --include-ignored
+        continue-on-error: true  # fails gracefully if module load failed
+
+      - name: Clippy (Linux)
         run: cargo clippy -p rcam -- -D warnings
+
+      - name: Clippy (optional features)
+        run: cargo clippy -p rcam --features serde,image-output -- -D warnings
 
   # -------------------------------------------------------------------------
   # macOS — AVFoundation backend
@@ -49,6 +70,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
@@ -59,10 +82,13 @@ jobs:
       - name: Build (macOS)
         run: cargo build -p rcam
 
-      - name: Run mock backend tests
-        run: cargo test -p rcam mock_camera
+      - name: Run mock + error tests
+        run: cargo test -p rcam --test mock_camera --test error_display
 
-      - name: Clippy
+      - name: Run optional-feature tests
+        run: cargo test -p rcam --test image_output --test serde_roundtrips --features serde,image-output
+
+      - name: Clippy (macOS)
         run: cargo clippy -p rcam -- -D warnings
 
   # -------------------------------------------------------------------------
@@ -76,6 +102,8 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
 
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
@@ -86,8 +114,14 @@ jobs:
       - name: Build (Windows)
         run: cargo build -p rcam
 
-      - name: Run mock backend tests
-        run: cargo test -p rcam mock_camera
+      - name: Run mock + error tests
+        run: cargo test -p rcam --test mock_camera --test error_display
+
+      - name: Run optional-feature tests
+        run: cargo test -p rcam --test image_output --test serde_roundtrips --features serde,image-output
+
+      - name: Clippy (Windows)
+        run: cargo clippy -p rcam -- -D warnings
 
   # -------------------------------------------------------------------------
   # WASM — Web backend
@@ -106,17 +140,23 @@ jobs:
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
 
-      - name: Install wasm-pack
-        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
-
       - name: Check (WASM)
         run: cargo check -p rcam --target wasm32-unknown-unknown
 
+      - name: Install wasm-pack
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Install Chrome (for headless browser tests)
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Run WASM tests in headless Chrome
+        run: wasm-pack test --headless --chrome rcam/
+
   # -------------------------------------------------------------------------
-  # Android — Camera2 NDK backend (check only; no hardware in CI)
+  # Android — Camera2 NDK (check only in main CI; emulator job is separate)
   # -------------------------------------------------------------------------
   android:
-    name: Android (Camera2 NDK — check only)
+    name: Android (Camera2 NDK — compile check)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -124,23 +164,34 @@ jobs:
       - name: Install Rust stable + Android targets
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-linux-android,armv7-linux-androideabi
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
 
       - name: Cache cargo registry
         uses: Swatinem/rust-cache@v2
 
       - name: Install Android NDK
+        id: setup-ndk
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r27c
 
-      - name: Check (Android aarch64)
+      - name: Check rcam (aarch64)
         env:
           ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
         run: cargo check -p rcam --target aarch64-linux-android
 
+      - name: Check rcam (armv7)
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo check -p rcam --target armv7-linux-androideabi
+
+      - name: Check rcam-sys-android (aarch64)
+        env:
+          ANDROID_NDK_ROOT: ${{ steps.setup-ndk.outputs.ndk-path }}
+        run: cargo check -p rcam-sys-android --target aarch64-linux-android
+
   # -------------------------------------------------------------------------
-  # Format + doc check (runs fast on ubuntu)
+  # Format + doc check (fast, runs on ubuntu)
   # -------------------------------------------------------------------------
   fmt-and-doc:
     name: Format & Docs
@@ -156,5 +207,8 @@ jobs:
       - name: Check formatting
         run: cargo fmt --all -- --check
 
-      - name: Build docs
+      - name: Build docs (rcam)
         run: cargo doc -p rcam --no-deps
+
+      - name: Build docs (with optional features)
+        run: cargo doc -p rcam --no-deps --features serde,image-output

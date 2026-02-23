@@ -1,5 +1,3 @@
-use async_trait::async_trait;
-
 use crate::{
     CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, RecordingOutput, VideoData,
 };
@@ -10,9 +8,21 @@ use crate::{
 /// trait (or the [`crate::Camera`] type alias that points to the active backend).
 ///
 /// # Async runtime
-/// All async methods are runtime-agnostic except on WASM, where only a
-/// WASM-compatible executor (e.g. `wasm-bindgen-futures`) may be used.
-#[async_trait]
+/// All async methods are runtime-agnostic. On WASM only a WASM-compatible
+/// executor (e.g. `wasm-bindgen-futures`) may be used, and the returned
+/// futures are **not** required to be `Send` (because browser APIs are
+/// inherently single-threaded).
+///
+/// # Conditional `Send + Sync`
+/// On native targets the trait requires `Send + Sync` so cameras can be
+/// shared across threads. On WASM those bounds are omitted because
+/// `web_sys` objects are not `Send`.
+
+// ---------------------------------------------------------------------------
+// Native targets (not WASM) — futures are Send + Sync
+// ---------------------------------------------------------------------------
+#[cfg(not(target_arch = "wasm32"))]
+#[async_trait::async_trait]
 pub trait CameraDevice: Send + Sync {
     /// List all cameras available on the current system.
     async fn enumerate() -> Result<Vec<CameraInfo>, CameraError>
@@ -49,6 +59,39 @@ pub trait CameraDevice: Send + Sync {
     fn capabilities(&self) -> &CameraCapabilities;
 
     /// Close the device and release all hardware resources.
+    async fn close(self) -> Result<(), CameraError>
+    where
+        Self: Sized;
+}
+
+// ---------------------------------------------------------------------------
+// WASM — futures do NOT need to be Send (single JS thread)
+// ---------------------------------------------------------------------------
+#[cfg(target_arch = "wasm32")]
+#[async_trait::async_trait(?Send)]
+pub trait CameraDevice {
+    async fn enumerate() -> Result<Vec<CameraInfo>, CameraError>
+    where
+        Self: Sized;
+
+    async fn open(config: CameraConfig) -> Result<Self, CameraError>
+    where
+        Self: Sized;
+
+    async fn start_stream(&mut self) -> Result<(), CameraError>;
+
+    async fn capture_frame(&self) -> Result<Frame, CameraError>;
+
+    async fn take_photo(&self) -> Result<Frame, CameraError>;
+
+    async fn start_recording(&mut self, output: RecordingOutput) -> Result<(), CameraError>;
+
+    async fn stop_recording(&mut self) -> Result<VideoData, CameraError>;
+
+    async fn stop_stream(&mut self) -> Result<(), CameraError>;
+
+    fn capabilities(&self) -> &CameraCapabilities;
+
     async fn close(self) -> Result<(), CameraError>
     where
         Self: Sized;

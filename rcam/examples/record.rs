@@ -1,47 +1,48 @@
-//! Example: open the default camera, record 5 seconds of video, and save it.
+//! Record five seconds of video and save to `recording.mp4`.
 //!
 //! Run with:
-//!   cargo run --example record -- [output_path]
-//!
-//! The output path defaults to `recording.mp4`.
+//! ```
+//! cargo run --example record
+//! ```
 
-use std::env;
 use std::path::PathBuf;
-use std::time::Duration;
 
-use rcam::{Camera, CameraConfig, CameraDevice, RecordingOutput, VideoOutput};
+use rcam::{CameraConfig, CameraDevice, RecordingOutput, VideoOutput};
+
+const RECORD_SECS: u64 = 5;
 
 #[tokio::main]
-async fn main() {
-    let output: PathBuf = env::args()
-        .nth(1)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("recording.mp4"));
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let config = CameraConfig::default();
+    let mut camera = rcam::Camera::open(config).await?;
 
-    println!("Opening default camera…");
-    let mut cam = Camera::open(CameraConfig::default())
-        .await
-        .expect("Failed to open camera");
+    camera.start_stream().await?;
 
-    println!("Starting recording to {}…", output.display());
-    cam.start_recording(RecordingOutput::File(output.clone()))
-        .await
-        .expect("Failed to start recording");
+    let output_path = PathBuf::from("recording.mp4");
+    println!("Recording {} seconds to {}…", RECORD_SECS, output_path.display());
 
-    println!("Recording for 5 seconds…");
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    camera
+        .start_recording(RecordingOutput::File(output_path.clone()))
+        .await?;
 
-    println!("Stopping recording…");
-    let video = cam.stop_recording().await.expect("Failed to stop recording");
+    tokio::time::sleep(std::time::Duration::from_secs(RECORD_SECS)).await;
+
+    let video = camera.stop_recording().await?;
 
     match video.kind {
-        VideoOutput::File(path) => println!("Saved video to {}", path.display()),
-        VideoOutput::Buffer(buf) => {
-            println!("Received {} bytes in memory", buf.len());
-            std::fs::write(&output, &buf).expect("Failed to write video buffer");
-            println!("Saved to {}", output.display());
+        VideoOutput::File(path) => println!("Saved recording to {}", path.display()),
+        VideoOutput::Buffer(bytes) => {
+            std::fs::write(&output_path, &bytes)?;
+            println!(
+                "Saved in-memory recording to {} ({} bytes)",
+                output_path.display(),
+                bytes.len()
+            );
         }
     }
 
-    cam.close().await.expect("Failed to close camera");
+    camera.stop_stream().await?;
+    camera.close().await?;
+
+    Ok(())
 }
