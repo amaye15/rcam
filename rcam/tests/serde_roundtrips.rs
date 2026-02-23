@@ -3,9 +3,7 @@
 //! Compiled only when the crate is built with `--features serde`
 //! (declared via `required-features` in Cargo.toml).
 
-use rcam::{
-    CameraCapabilities, CameraInfo, CameraPosition, Frame, FrameFormat, Resolution,
-};
+use rcam::{CameraCapabilities, CameraInfo, CameraPosition, Frame, FrameFormat, Resolution};
 
 // ---------------------------------------------------------------------------
 // Resolution
@@ -13,7 +11,10 @@ use rcam::{
 
 #[test]
 fn resolution_roundtrip() {
-    let original = Resolution { width: 1920, height: 1080 };
+    let original = Resolution {
+        width: 1920,
+        height: 1080,
+    };
     let json = serde_json::to_string(&original).unwrap();
     let decoded: Resolution = serde_json::from_str(&json).unwrap();
     assert_eq!(original, decoded);
@@ -21,7 +22,10 @@ fn resolution_roundtrip() {
 
 #[test]
 fn resolution_serialises_as_expected_json() {
-    let res = Resolution { width: 640, height: 480 };
+    let res = Resolution {
+        width: 640,
+        height: 480,
+    };
     let json = serde_json::to_string(&res).unwrap();
     assert!(json.contains("640"));
     assert!(json.contains("480"));
@@ -114,8 +118,14 @@ fn frame_roundtrip() {
 fn camera_capabilities_roundtrip() {
     let caps = CameraCapabilities {
         supported_resolutions: vec![
-            Resolution { width: 640, height: 480 },
-            Resolution { width: 1920, height: 1080 },
+            Resolution {
+                width: 640,
+                height: 480,
+            },
+            Resolution {
+                width: 1920,
+                height: 1080,
+            },
         ],
         supported_frame_rates: vec![24, 30, 60],
         supported_formats: vec![FrameFormat::NV12, FrameFormat::BGRA],
@@ -127,5 +137,8 @@ fn camera_capabilities_roundtrip() {
     assert_eq!(decoded.supported_frame_rates, caps.supported_frame_rates);
     assert_eq!(decoded.has_torch, caps.has_torch);
     assert_eq!(decoded.has_zoom, caps.has_zoom);
-    assert_eq!(decoded.supported_resolutions.len(), caps.supported_resolutions.len());
+    assert_eq!(
+        decoded.supported_resolutions.len(),
+        caps.supported_resolutions.len()
+    );
 }

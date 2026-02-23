@@ -7,9 +7,9 @@
 use std::sync::OnceLock;
 
 use dispatch2::{DispatchQueue, DispatchRetained};
-use objc2::{define_class, msg_send, ClassType, DefinedClass};
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::{define_class, msg_send, ClassType, DefinedClass};
 use objc2_av_foundation::{
     AVCaptureConnection, AVCaptureDeviceInput, AVCaptureOutput, AVCaptureSession,
     AVCaptureVideoDataOutput, AVCaptureVideoDataOutputSampleBufferDelegate,
@@ -113,7 +113,7 @@ fn extract_frame(sample_buffer: &CMSampleBuffer) -> Option<Frame> {
     let image_buffer = unsafe { sample_buffer.image_buffer() }?;
 
     // CVPixelBuffer = CVImageBuffer = CVBuffer (type aliases).
-    let pixel_buffer: &objc2_core_video::CVPixelBuffer = &*image_buffer;
+    let pixel_buffer: &objc2_core_video::CVPixelBuffer = &image_buffer;
 
     // Lock the pixel buffer for read-only access.
     // SAFETY: Every lock is paired with an unlock before we return.
@@ -135,8 +135,7 @@ fn extract_frame(sample_buffer: &CMSampleBuffer) -> Option<Frame> {
         for row in 0..height {
             // SAFETY: each row starts at base + row * bpr.
             let row_ptr = unsafe { base.add(row as usize * bpr) };
-            let row_slice =
-                unsafe { std::slice::from_raw_parts(row_ptr, (width * 4) as usize) };
+            let row_slice = unsafe { std::slice::from_raw_parts(row_ptr, (width * 4) as usize) };
             data.extend_from_slice(row_slice);
         }
         data
@@ -145,7 +144,13 @@ fn extract_frame(sample_buffer: &CMSampleBuffer) -> Option<Frame> {
     // SAFETY: paired with the lock above.
     unsafe { CVPixelBufferUnlockBaseAddress(pixel_buffer, CVPixelBufferLockFlags(0)) };
 
-    Some(Frame { data, width, height, format: FrameFormat::BGRA, timestamp_us: 0 })
+    Some(Frame {
+        data,
+        width,
+        height,
+        format: FrameFormat::BGRA,
+        timestamp_us: 0,
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -185,9 +190,7 @@ impl AvfSession {
 
         // --- Device input ---
         let input = unsafe { AVCaptureDeviceInput::deviceInputWithDevice_error(&device) }
-            .map_err(|e| {
-                CameraError::Backend(e.localizedDescription().to_string())
-            })?;
+            .map_err(|e| CameraError::Backend(e.localizedDescription().to_string()))?;
 
         if unsafe { session.canAddInput(&input) } {
             unsafe { session.addInput(&input) };
@@ -237,7 +240,9 @@ impl AvfSession {
         if unsafe { session.canAddOutput(&video_output) } {
             unsafe { session.addOutput(&video_output) };
         } else {
-            return Err(CameraError::Backend("Cannot add video output to session".into()));
+            return Err(CameraError::Backend(
+                "Cannot add video output to session".into(),
+            ));
         }
 
         // Resolution / frame-rate tuning will be applied in a later phase.

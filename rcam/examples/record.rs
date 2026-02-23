@@ -19,7 +19,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     camera.start_stream().await?;
 
     let output_path = PathBuf::from("recording.mp4");
-    println!("Recording {} seconds to {}…", RECORD_SECS, output_path.display());
+    println!(
+        "Recording {} seconds to {}…",
+        RECORD_SECS,
+        output_path.display()
+    );
 
     camera
         .start_recording(RecordingOutput::File(output_path.clone()))

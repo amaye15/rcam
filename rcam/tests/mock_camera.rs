@@ -8,8 +8,8 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use rcam::{
-    CameraCapabilities, CameraConfig, CameraDevice, CameraError, CameraInfo, CameraPosition,
-    Frame, FrameFormat, RecordingOutput, Resolution, VideoData, VideoOutput,
+    CameraCapabilities, CameraConfig, CameraDevice, CameraError, CameraInfo, CameraPosition, Frame,
+    FrameFormat, RecordingOutput, Resolution, VideoData, VideoOutput,
 };
 
 // ---------------------------------------------------------------------------
@@ -29,8 +29,14 @@ impl MockCamera {
         Self {
             capabilities: CameraCapabilities {
                 supported_resolutions: vec![
-                    Resolution { width: 640, height: 480 },
-                    Resolution { width: 1280, height: 720 },
+                    Resolution {
+                        width: 640,
+                        height: 480,
+                    },
+                    Resolution {
+                        width: 1280,
+                        height: 720,
+                    },
                 ],
                 supported_frame_rates: vec![15, 30, 60],
                 supported_formats: vec![FrameFormat::BGRA, FrameFormat::NV12],
@@ -55,7 +61,13 @@ impl MockCamera {
                 data.extend_from_slice(&[luma, luma, luma, 255]);
             }
         }
-        Frame { data, width, height, format: FrameFormat::BGRA, timestamp_us: 0 }
+        Frame {
+            data,
+            width,
+            height,
+            format: FrameFormat::BGRA,
+            timestamp_us: 0,
+        }
     }
 }
 
@@ -163,7 +175,10 @@ async fn test_stream_lifecycle() {
     let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
 
     // Capturing before start_stream should fail.
-    assert!(matches!(cam.capture_frame().await, Err(CameraError::StreamNotActive)));
+    assert!(matches!(
+        cam.capture_frame().await,
+        Err(CameraError::StreamNotActive)
+    ));
 
     cam.start_stream().await.unwrap();
     let frame = cam.capture_frame().await.unwrap();
@@ -188,7 +203,10 @@ async fn test_recording_lifecycle() {
     let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
 
     // stop_recording before start_recording should fail.
-    assert!(matches!(cam.stop_recording().await, Err(CameraError::NotRecording)));
+    assert!(matches!(
+        cam.stop_recording().await,
+        Err(CameraError::NotRecording)
+    ));
 
     cam.start_recording(RecordingOutput::Buffer).await.unwrap();
     let video = cam.stop_recording().await.unwrap();
@@ -210,7 +228,9 @@ async fn test_capabilities() {
 async fn test_file_recording_output() {
     let mut cam = MockCamera::open(CameraConfig::default()).await.unwrap();
     let path = PathBuf::from("/tmp/rcam_test_output.mp4");
-    cam.start_recording(RecordingOutput::File(path.clone())).await.unwrap();
+    cam.start_recording(RecordingOutput::File(path.clone()))
+        .await
+        .unwrap();
     let video = cam.stop_recording().await.unwrap();
     // The mock now returns the File variant when given RecordingOutput::File.
     assert!(matches!(video.kind, VideoOutput::File(_)));
@@ -226,7 +246,10 @@ async fn test_double_stop_recording_returns_error() {
     cam.start_recording(RecordingOutput::Buffer).await.unwrap();
     cam.stop_recording().await.unwrap();
     // Second stop with no active recording must fail.
-    assert!(matches!(cam.stop_recording().await, Err(CameraError::NotRecording)));
+    assert!(matches!(
+        cam.stop_recording().await,
+        Err(CameraError::NotRecording)
+    ));
     cam.close().await.unwrap();
 }
 

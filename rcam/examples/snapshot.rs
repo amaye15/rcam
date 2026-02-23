@@ -42,7 +42,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Without image-output, write raw bytes to disk.
         let out = PathBuf::from("snapshot.raw");
         std::fs::write(&out, &frame.data)?;
-        println!("Saved raw frame to {} ({} bytes)", out.display(), frame.data.len());
+        println!(
+            "Saved raw frame to {} ({} bytes)",
+            out.display(),
+            frame.data.len()
+        );
     }
 
     camera.stop_stream().await?;

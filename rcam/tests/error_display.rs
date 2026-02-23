@@ -4,12 +4,18 @@ use rcam::{CameraError, FrameFormat};
 
 #[test]
 fn no_camera_found_message() {
-    assert_eq!(CameraError::NoCameraFound.to_string(), "No camera device found");
+    assert_eq!(
+        CameraError::NoCameraFound.to_string(),
+        "No camera device found"
+    );
 }
 
 #[test]
 fn permission_denied_message() {
-    assert_eq!(CameraError::PermissionDenied.to_string(), "Permission denied");
+    assert_eq!(
+        CameraError::PermissionDenied.to_string(),
+        "Permission denied"
+    );
 }
 
 #[test]
@@ -59,7 +65,10 @@ fn backend_error_includes_payload() {
 
 #[test]
 fn unsupported_message() {
-    assert_eq!(CameraError::Unsupported.to_string(), "Platform not supported");
+    assert_eq!(
+        CameraError::Unsupported.to_string(),
+        "Platform not supported"
+    );
 }
 
 #[test]

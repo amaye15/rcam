@@ -23,15 +23,24 @@ use rcam::{CameraError, CameraPosition, FrameFormat, Resolution};
 
 #[wasm_bindgen_test]
 fn resolution_fields_accessible() {
-    let r = Resolution { width: 1280, height: 720 };
+    let r = Resolution {
+        width: 1280,
+        height: 720,
+    };
     assert_eq!(r.width, 1280);
     assert_eq!(r.height, 720);
 }
 
 #[wasm_bindgen_test]
 fn resolution_equality() {
-    let a = Resolution { width: 640, height: 480 };
-    let b = Resolution { width: 640, height: 480 };
+    let a = Resolution {
+        width: 640,
+        height: 480,
+    };
+    let b = Resolution {
+        width: 640,
+        height: 480,
+    };
     assert_eq!(a, b);
 }
 

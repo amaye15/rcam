@@ -15,8 +15,8 @@ use tokio::sync::mpsc;
 
 use crate::traits::CameraDevice;
 use crate::{
-    CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, FrameFormat,
-    RecordingOutput, VideoData,
+    CameraCapabilities, CameraConfig, CameraError, CameraInfo, Frame, FrameFormat, RecordingOutput,
+    VideoData,
 };
 
 use capture::{capture_loop, open_device};
@@ -117,11 +117,7 @@ impl CameraDevice for V4l2Camera {
                         .data
                         .chunks_exact(4)
                         .take(256)
-                        .map(|p| {
-                            0.299 * p[2] as f32
-                                + 0.587 * p[1] as f32
-                                + 0.114 * p[0] as f32
-                        })
+                        .map(|p| 0.299 * p[2] as f32 + 0.587 * p[1] as f32 + 0.114 * p[0] as f32)
                         .sum::<f32>()
                         / 256.0;
                     if avg_lum > 1.0 || skipped >= 30 {
@@ -167,12 +163,10 @@ impl CameraDevice for V4l2Camera {
     where
         Self: Sized,
     {
-        let Self { frame_rx, stream_task, capabilities: _ } = self;
-        // Dropping the receiver causes `tx.send()` in the capture loop to
-        // fail, which cleanly terminates the blocking thread.
-        drop(frame_rx);
-        // Abort the wrapper async task in case the loop hasn't exited yet.
-        stream_task.abort();
+        // Aborting the stream task causes the blocking capture loop to exit.
+        // The Drop impl also calls abort(), which is idempotent.
+        // frame_rx is dropped when self is dropped, closing the channel.
+        self.stream_task.abort();
         Ok(())
     }
 }

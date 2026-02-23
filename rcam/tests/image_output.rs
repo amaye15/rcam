@@ -11,15 +11,27 @@ use rcam::{Frame, FrameFormat};
 // ---------------------------------------------------------------------------
 
 fn make_frame(w: u32, h: u32, format: FrameFormat, data: Vec<u8>) -> Frame {
-    Frame { data, width: w, height: h, format, timestamp_us: 0 }
+    Frame {
+        data,
+        width: w,
+        height: h,
+        format,
+        timestamp_us: 0,
+    }
 }
 
 fn solid_rgb24(w: u32, h: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
-    std::iter::repeat([r, g, b]).take((w * h) as usize).flatten().collect()
+    std::iter::repeat([r, g, b])
+        .take((w * h) as usize)
+        .flatten()
+        .collect()
 }
 
 fn solid_bgra(w: u32, h: u32, b: u8, g: u8, r: u8, a: u8) -> Vec<u8> {
-    std::iter::repeat([b, g, r, a]).take((w * h) as usize).flatten().collect()
+    std::iter::repeat([b, g, r, a])
+        .take((w * h) as usize)
+        .flatten()
+        .collect()
 }
 
 fn gray_yuv420(w: u32, h: u32) -> Vec<u8> {
@@ -41,7 +53,10 @@ fn encode_jpeg(w: u32, h: u32, r: u8, g: u8, b: u8) -> Vec<u8> {
     let dynimg = DynamicImage::ImageRgb8(img);
     let mut buf = Vec::new();
     dynimg
-        .write_to(&mut std::io::Cursor::new(&mut buf), image::ImageFormat::Jpeg)
+        .write_to(
+            &mut std::io::Cursor::new(&mut buf),
+            image::ImageFormat::Jpeg,
+        )
         .expect("JPEG encode failed");
     buf
 }
@@ -85,7 +100,12 @@ fn rgb24_too_small_buffer_returns_error() {
 fn bgra_channels_are_reordered_to_rgba() {
     let (w, h) = (4, 4);
     // BGRA = [B=0x10, G=0x20, R=0x30, A=0xFF]
-    let frame = make_frame(w, h, FrameFormat::BGRA, solid_bgra(w, h, 0x10, 0x20, 0x30, 0xFF));
+    let frame = make_frame(
+        w,
+        h,
+        FrameFormat::BGRA,
+        solid_bgra(w, h, 0x10, 0x20, 0x30, 0xFF),
+    );
     let img = frame.to_image().unwrap();
     let rgba = img.to_rgba8();
     let px = rgba.get_pixel(0, 0);
@@ -127,7 +147,10 @@ fn yuv420_gray_frame_produces_valid_image() {
     for px in rgb.pixels() {
         for &channel in px.0.iter() {
             let diff = (channel as i32 - 128).unsigned_abs();
-            assert!(diff <= 10, "expected near-gray pixel, got channel value {channel}");
+            assert!(
+                diff <= 10,
+                "expected near-gray pixel, got channel value {channel}"
+            );
         }
     }
 }
@@ -153,7 +176,10 @@ fn nv12_gray_frame_produces_valid_image() {
     for px in rgb.pixels() {
         for &channel in px.0.iter() {
             let diff = (channel as i32 - 128).unsigned_abs();
-            assert!(diff <= 10, "expected near-gray pixel, got channel value {channel}");
+            assert!(
+                diff <= 10,
+                "expected near-gray pixel, got channel value {channel}"
+            );
         }
     }
 }

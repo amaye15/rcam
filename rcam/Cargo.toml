@@ -33,11 +33,15 @@ image-output    = ["dep:image"]
 [dependencies]
 async-trait = { workspace = true }
 thiserror   = { workspace = true }
-tokio       = { version = "1", features = ["sync", "rt"] }
 
 serde       = { version = "1", features = ["derive"], optional = true }
 image       = { version = "0.25", optional = true }
 ffmpeg-next = { version = "7", optional = true }
+
+# tokio is not available on WASM (mio doesn't support wasm32).
+# Native targets need "sync" (channels/mutex) and "rt" (spawn_blocking).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["sync", "rt"] }
 
 # ---------------------------------------------------------------------------
 # macOS + iOS — AVFoundation
@@ -139,10 +143,12 @@ features = [
 ]
 
 [dev-dependencies]
-tokio        = { version = "1", features = ["full"] }
-serde_json   = "1"
+serde_json        = "1"
 # WASM-only test harness (inactive on native targets).
 wasm-bindgen-test = "0.3"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { version = "1", features = ["full"] }
 
 # ---------------------------------------------------------------------------
 # Named test targets — some require optional features to compile.
