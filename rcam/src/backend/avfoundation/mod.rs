@@ -163,7 +163,7 @@ impl CameraDevice for AvfCamera {
         // Detach the movie output from the capture session.
         {
             let guard = self.session.lock().unwrap();
-            unsafe { guard.session.removeOutput(&**movie_output) };
+            unsafe { guard.session.removeOutput(&movie_output) };
         }
 
         if is_temp {
@@ -207,7 +207,7 @@ impl CameraDevice for AvfCamera {
             let movie_output = session::SendWrapper(rec.movie_output.0.clone());
             let _ = rec.stop_and_wait().await;
             if let Ok(guard) = session.lock() {
-                unsafe { guard.session.removeOutput(&**movie_output) };
+                unsafe { guard.session.removeOutput(&movie_output) };
             }
         }
 

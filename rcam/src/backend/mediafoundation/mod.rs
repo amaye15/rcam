@@ -212,7 +212,7 @@ impl CameraDevice for MfCamera {
     async fn take_photo(&self) -> Result<Frame, CameraError> {
         // Clone the SendWrapper<MediaCapture> (Send) so it can cross thread boundary.
         let capture = self.capture.clone();
-        let resolution = self.resolution.clone();
+        let resolution = self.resolution;
 
         tokio::task::spawn_blocking(move || {
             // Encode to JPEG in-memory.
@@ -427,7 +427,7 @@ fn timestamp_us_now() -> u64 {
 ///
 /// Must be called on a blocking thread; uses [`wrt_get`] internally.
 fn open_or_create_storage_file_sync(
-    path: &PathBuf,
+    path: &std::path::Path,
 ) -> Result<windows::Storage::StorageFile, CameraError> {
     use windows::Storage::{CreationCollisionOption, StorageFolder};
 
