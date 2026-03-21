@@ -134,9 +134,7 @@ fn extract_frame(sample_buffer: &CMSampleBuffer) -> Option<Frame> {
             let bpr = CVPixelBufferGetBytesPerRow(pixel_buffer);
             let base = CVPixelBufferGetBaseAddress(pixel_buffer) as *const u8;
             if bpr == (width * 4) as usize {
-                unsafe {
-                    std::slice::from_raw_parts(base, (width * height * 4) as usize).to_vec()
-                }
+                unsafe { std::slice::from_raw_parts(base, (width * height * 4) as usize).to_vec() }
             } else {
                 let mut out = Vec::with_capacity((width * height * 4) as usize);
                 for row in 0..height {
@@ -154,10 +152,8 @@ fn extract_frame(sample_buffer: &CMSampleBuffer) -> Option<Frame> {
             let video_range = pixel_format == 0x34323076;
             let y_stride = CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer, 0);
             let uv_stride = CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer, 1);
-            let y_base =
-                CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, 0) as *const u8;
-            let uv_base =
-                CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, 1) as *const u8;
+            let y_base = CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, 0) as *const u8;
+            let uv_base = CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, 1) as *const u8;
 
             let mut bgra = vec![0u8; (width * height * 4) as usize];
             for row in 0..height as usize {
