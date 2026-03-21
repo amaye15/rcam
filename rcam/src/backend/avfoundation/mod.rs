@@ -150,30 +150,20 @@ impl CameraDevice for AvfCamera {
             .take()
             .ok_or(CameraError::NotRecording)?;
 
-        // Signal AVFoundation to flush and close the output file.
-        recorder.stop();
+        let output_path = recorder.output_path.clone();
+        let is_temp = recorder.is_temp;
+        // Clone the movie output so we can detach it from the session after the
+        // await.  Wrap in SendWrapper so it can live across the await boundary.
+        let movie_output = session::SendWrapper(recorder.movie_output.0.clone());
 
-        // Destructure so we can await `done_rx` while still accessing
-        // `movie_output` and `_delegate` stays alive until end of scope
-        // (the delegate must not be dropped before it fires).
-        let recorder::AvfRecorder {
-            movie_output,
-            delegate: _delegate,
-            done_rx,
-            output_path,
-            is_temp,
-        } = recorder;
-
-        // Wait for the delegate callback confirming the file is fully written.
-        done_rx
-            .await
-            .map_err(|_| CameraError::Backend("Recording delegate was dropped".into()))?
-            .map_err(CameraError::Backend)?;
+        // stop_and_wait calls stopRecording() then blocks in spawn_blocking,
+        // keeping the delegate alive on a real OS thread until the callback fires.
+        recorder.stop_and_wait().await?;
 
         // Detach the movie output from the capture session.
         {
             let guard = self.session.lock().unwrap();
-            unsafe { guard.session.removeOutput(&movie_output) };
+            unsafe { guard.session.removeOutput(&**movie_output) };
         }
 
         if is_temp {
@@ -214,17 +204,10 @@ impl CameraDevice for AvfCamera {
 
         // Stop any active recording gracefully.
         if let Some(rec) = recording.into_inner().unwrap() {
-            rec.stop();
-            let recorder::AvfRecorder {
-                movie_output,
-                delegate: _delegate,
-                done_rx,
-                output_path: _,
-                is_temp: _,
-            } = rec;
-            let _ = done_rx.await;
+            let movie_output = session::SendWrapper(rec.movie_output.0.clone());
+            let _ = rec.stop_and_wait().await;
             if let Ok(guard) = session.lock() {
-                unsafe { guard.session.removeOutput(&movie_output) };
+                unsafe { guard.session.removeOutput(&**movie_output) };
             }
         }
 

@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>rcam web demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, sans-serif;
+      background: #111;
+      color: #eee;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      min-height: 100vh;
+    }
+    h1 { font-size: 1.5rem; letter-spacing: 0.05em; color: #f97316; }
+    #status {
+      font-size: 0.85rem;
+      color: #94a3b8;
+      min-height: 1.2em;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: center;
+    }
+    select {
+      background: #1e293b;
+      color: #eee;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 0.9rem;
+    }
+    button {
+      background: #1e293b;
+      color: #eee;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    button:hover:not(:disabled) { background: #334155; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    button.primary {
+      background: #f97316;
+      border-color: #f97316;
+      color: #000;
+      font-weight: 600;
+    }
+    button.primary:hover:not(:disabled) { background: #fb923c; }
+    button.danger { border-color: #ef4444; color: #ef4444; }
+    button.danger:hover:not(:disabled) { background: #1e293b; }
+    #preview-wrap {
+      position: relative;
+      border: 1px solid #334155;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #000;
+      max-width: 100%;
+    }
+    canvas { display: block; max-width: 100%; }
+    #info {
+      font-size: 0.75rem;
+      color: #64748b;
+    }
+    button.rec { border-color: #ef4444; color: #ef4444; }
+    button.rec:hover:not(:disabled) { background: #1e293b; }
+    button.rec.recording {
+      background: #ef4444;
+      color: #fff;
+      border-color: #ef4444;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0.6; }
+    }
+    .media-section {
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+    }
+    .media-section h2 { font-size: 1rem; color: #94a3b8; }
+    .media-section canvas,
+    .media-section video {
+      border: 1px solid #334155;
+      border-radius: 8px;
+      max-width: 100%;
+    }
+    a.download-btn {
+      background: #1e293b;
+      color: #eee;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px 14px;
+      font-size: 0.9rem;
+      text-decoration: none;
+    }
+    a.download-btn:hover { background: #334155; }
+  </style>
+</head>
+<body>
+  <h1>rcam · web demo</h1>
+  <div id="status">Loading WASM module…</div>
+
+  <div class="controls">
+    <select id="camera-select"><option value="">Default camera</option></select>
+    <button id="start-btn" class="primary" disabled>Start Camera</button>
+    <button id="stop-btn"  class="danger"  disabled>Stop</button>
+    <button id="snap-btn"                  disabled>Snapshot</button>
+    <button id="rec-btn"   class="rec"      disabled>⏺ Record</button>
+    <button id="stoprec-btn"               disabled>⏹ Stop Rec</button>
+  </div>
+
+  <div id="preview-wrap">
+    <canvas id="preview" width="640" height="480"></canvas>
+  </div>
+  <div id="info"></div>
+
+  <div id="snapshot-section" class="media-section">
+    <h2>Snapshot</h2>
+    <canvas id="snapshot-canvas"></canvas>
+    <a id="snapshot-dl" class="download-btn" download="snapshot.png">Download PNG</a>
+  </div>
+
+  <div id="recording-section" class="media-section">
+    <h2>Recording</h2>
+    <video id="recorded-video" controls></video>
+    <a id="recording-dl" class="download-btn" download="recording.webm">Download WebM</a>
+  </div>
+
+  <script type="module">
+    import init, {
+      enumerate_cameras,
+      start_camera,
+      capture_frame,
+      stop_camera,
+      start_recording,
+      stop_recording,
+      camera_width,
+      camera_height,
+    } from './pkg/rcam_web_demo.js';
+
+    const status       = document.getElementById('status');
+    const select       = document.getElementById('camera-select');
+    const startBtn     = document.getElementById('start-btn');
+    const stopBtn      = document.getElementById('stop-btn');
+    const snapBtn      = document.getElementById('snap-btn');
+    const recBtn       = document.getElementById('rec-btn');
+    const stopRecBtn   = document.getElementById('stoprec-btn');
+    const preview      = document.getElementById('preview');
+    const ctx          = preview.getContext('2d');
+    const infoEl       = document.getElementById('info');
+    const snapSec      = document.getElementById('snapshot-section');
+    const snapCanvas   = document.getElementById('snapshot-canvas');
+    const snapCtx      = snapCanvas.getContext('2d');
+    const snapDl       = document.getElementById('snapshot-dl');
+    const recSec       = document.getElementById('recording-section');
+    const recordedVid  = document.getElementById('recorded-video');
+    const recDl        = document.getElementById('recording-dl');
+
+    let running = false;
+    let recObjectUrl = null;
+
+    // ── initialise WASM ────────────────────────────────────────────────────
+    await init();
+    status.textContent = 'WASM loaded. Listing devices…';
+
+    await populateCameras();
+    startBtn.disabled = false;
+    status.textContent = 'Ready. Select a camera and click Start.';
+
+    // ── enumerate ──────────────────────────────────────────────────────────
+    async function populateCameras() {
+      try {
+        const cameras = await enumerate_cameras();
+        // Wipe existing options except the default placeholder.
+        select.innerHTML = '<option value="">Default camera</option>';
+        for (const cam of cameras) {
+          const opt = document.createElement('option');
+          opt.value = cam.id;
+          opt.textContent = cam.name || `Camera (${cam.id.slice(0, 8)}…)`;
+          select.appendChild(opt);
+        }
+      } catch (e) {
+        console.warn('enumerate_cameras():', e);
+        // Not fatal — the user can still start with the default camera.
+      }
+    }
+
+    // ── start ──────────────────────────────────────────────────────────────
+    startBtn.onclick = async () => {
+      startBtn.disabled = true;
+      status.textContent = 'Opening camera… (grant permission if prompted)';
+      try {
+        const deviceId = select.value || null;
+        await start_camera(deviceId);
+
+        // Re-list now that permission is granted (labels become available).
+        await populateCameras();
+
+        running = true;
+        stopBtn.disabled = false;
+        snapBtn.disabled = false;
+        recBtn.disabled  = false;
+        status.textContent = 'Camera active ▶';
+
+        frameLoop();
+      } catch (e) {
+        status.textContent = `Error: ${e}`;
+        startBtn.disabled = false;
+      }
+    };
+
+    // ── frame loop ─────────────────────────────────────────────────────────
+    // Use a RAF-wrapped promise so we sync to the display refresh rate and
+    // never block the browser's event loop.
+    const rafTick = () => new Promise(r => requestAnimationFrame(r));
+
+    let frameCount = 0;
+    let lastFpsTime = performance.now();
+    let fps = 0;
+
+    async function frameLoop() {
+      while (running) {
+        await rafTick();
+        try {
+          const pixels = await capture_frame();
+          const w = camera_width();
+          const h = camera_height();
+
+          if (preview.width !== w || preview.height !== h) {
+            preview.width  = w;
+            preview.height = h;
+          }
+
+          const imageData = new ImageData(
+            new Uint8ClampedArray(pixels.buffer),
+            w, h
+          );
+          ctx.putImageData(imageData, 0, 0);
+
+          // Update FPS counter every second.
+          frameCount++;
+          const now = performance.now();
+          if (now - lastFpsTime >= 1000) {
+            fps = Math.round(frameCount * 1000 / (now - lastFpsTime));
+            frameCount  = 0;
+            lastFpsTime = now;
+            infoEl.textContent = `${w}×${h}  •  ${fps} fps`;
+          }
+        } catch (e) {
+          console.error('capture_frame():', e);
+          status.textContent = `Frame error: ${e}`;
+          running = false;
+        }
+      }
+    }
+
+    // ── stop ───────────────────────────────────────────────────────────────
+    stopBtn.onclick = async () => {
+      running = false;
+      stopBtn.disabled    = true;
+      snapBtn.disabled    = true;
+      recBtn.disabled     = true;
+      stopRecBtn.disabled = true;
+      recBtn.classList.remove('recording');
+      await stop_camera();
+      startBtn.disabled  = false;
+      infoEl.textContent = '';
+      status.textContent = 'Camera stopped.';
+    };
+
+    // ── record ─────────────────────────────────────────────────────────────
+    recBtn.onclick = async () => {
+      recBtn.disabled     = true;
+      stopRecBtn.disabled = false;
+      recBtn.classList.add('recording');
+      if (recObjectUrl) { URL.revokeObjectURL(recObjectUrl); recObjectUrl = null; }
+      recSec.style.display = 'none';
+      try {
+        await start_recording();
+        status.textContent = '⏺ Recording…';
+      } catch (e) {
+        status.textContent  = `Record error: ${e}`;
+        recBtn.disabled     = false;
+        stopRecBtn.disabled = true;
+        recBtn.classList.remove('recording');
+      }
+    };
+
+    stopRecBtn.onclick = async () => {
+      stopRecBtn.disabled = true;
+      recBtn.classList.remove('recording');
+      status.textContent  = 'Finalising recording…';
+      try {
+        const bytes = await stop_recording();
+        const blob  = new Blob([bytes], { type: 'video/webm' });
+        recObjectUrl = URL.createObjectURL(blob);
+        recordedVid.src    = recObjectUrl;
+        recDl.href         = recObjectUrl;
+        recSec.style.display = 'flex';
+        recBtn.disabled    = false;
+        status.textContent = `Recording saved — ${(blob.size / 1024).toFixed(1)} KB`;
+      } catch (e) {
+        status.textContent = `Stop-record error: ${e}`;
+        recBtn.disabled    = false;
+      }
+    };
+
+    // ── snapshot ───────────────────────────────────────────────────────────
+    snapBtn.onclick = async () => {
+      try {
+        const pixels = await capture_frame();
+        const w = camera_width();
+        const h = camera_height();
+
+        snapCanvas.width  = w;
+        snapCanvas.height = h;
+        const imageData = new ImageData(
+          new Uint8ClampedArray(pixels.buffer),
+          w, h
+        );
+        snapCtx.putImageData(imageData, 0, 0);
+
+        // Generate a downloadable PNG link.
+        snapDl.href = snapCanvas.toDataURL('image/png');
+
+        snapSec.style.display = 'flex';
+        status.textContent = `Snapshot: ${w}×${h}`;
+      } catch (e) {
+        status.textContent = `Snapshot error: ${e}`;
+      }
+    };
+  </script>
+</body>
+</html>

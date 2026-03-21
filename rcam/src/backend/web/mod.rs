@@ -97,13 +97,20 @@ impl CameraDevice for WebCamera {
         js_sys::Reflect::set(&video, &"playsInline".into(), &JsValue::TRUE).ok();
         video.set_src_object(Some(&stream));
 
+        // Register the `loadeddata` listener BEFORE calling play() to avoid a
+        // race: for live camera streams the event can fire during play()'s own
+        // Promise resolution, and a listener registered afterwards would miss it.
+        let loadeddata = register_event_future(&video, "loadeddata")?;
+
         // `play()` returns a Promise — await it so the stream is active.
         JsFuture::from(video.play().map_err(|e| CameraError::Backend(js_err(e)))?)
             .await
             .map_err(|e| CameraError::Backend(js_err(e)))?;
 
-        // Wait for `loadeddata` so at least one video frame is available.
-        wait_for_event(&video, "loadeddata").await?;
+        // Now await the loadeddata future we registered above.
+        loadeddata
+            .await
+            .map_err(|e| CameraError::Backend(js_err(e)))?;
 
         // Determine actual stream dimensions (may differ from config).
         let w = video.video_width().max(config.resolution.width);
@@ -260,12 +267,17 @@ fn grab_frame(
 // DOM / JS helpers
 // ---------------------------------------------------------------------------
 
-/// Wait for a named DOM event on `target` by wrapping a one-shot listener
-/// in a manually-resolved JS `Promise`.
-async fn wait_for_event(
+/// Register a one-shot DOM event listener and return a `JsFuture` that
+/// resolves when the event fires.
+///
+/// The listener is attached **immediately** on call; the caller decides when
+/// to `.await` the returned future.  This allows registering before an async
+/// operation (e.g. `play()`) so that events fired during that operation are
+/// never missed.
+fn register_event_future(
     target: &web_sys::HtmlVideoElement,
     event_name: &str,
-) -> Result<(), CameraError> {
+) -> Result<JsFuture, CameraError> {
     use js_sys::Promise;
 
     let mut resolve_fn: Option<js_sys::Function> = None;
@@ -283,11 +295,7 @@ async fn wait_for_event(
         .map_err(|e| CameraError::Backend(js_err(e)))?;
     cb.forget();
 
-    JsFuture::from(promise)
-        .await
-        .map_err(|e| CameraError::Backend(js_err(e)))?;
-
-    Ok(())
+    Ok(JsFuture::from(promise))
 }
 
 /// Current time in microseconds since the Unix epoch.

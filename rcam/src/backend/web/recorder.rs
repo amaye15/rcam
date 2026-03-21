@@ -31,12 +31,21 @@ pub struct WebRecorder {
 impl WebRecorder {
     /// Start recording from `stream`.
     ///
-    /// Uses `video/webm` (widest browser-native format) with a 100 ms chunk
-    /// interval so there's always data available even for short recordings.
+    /// Probes `MediaRecorder.isTypeSupported()` to select the best available
+    /// MIME type: VP9 WebM → WebM → MP4 (Safari) → browser default.
+    /// Uses a 100 ms chunk interval so there's always data even for short clips.
     pub fn start(stream: &web_sys::MediaStream) -> Result<Self, CameraError> {
-        // Prefer webm; fall back to whatever the browser supports.
+        // Pick the best MIME type the current browser supports.
+        let mime_type = ["video/webm;codecs=vp9", "video/webm", "video/mp4"]
+            .iter()
+            .copied()
+            .find(|t| web_sys::MediaRecorder::is_type_supported(t))
+            .unwrap_or("");
+
         let opts = web_sys::MediaRecorderOptions::new();
-        opts.set_mime_type("video/webm");
+        if !mime_type.is_empty() {
+            opts.set_mime_type(mime_type);
+        }
 
         let recorder =
             web_sys::MediaRecorder::new_with_media_stream_and_media_recorder_options(stream, &opts)

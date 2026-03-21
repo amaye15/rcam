@@ -1,0 +1,27 @@
+userName: ${BROWSERSTACK_USERNAME}
+accessKey: ${BROWSERSTACK_ACCESS_KEY}
+
+browsersAndDevices:
+  - browser: chrome
+    browserVersion: latest
+    os: Windows
+    osVersion: 11
+  - browser: firefox
+    browserVersion: latest
+    os: Windows
+    osVersion: 11
+  - browser: safari
+    browserVersion: latest
+    os: OS X
+    osVersion: Sonoma
+  - deviceName: Samsung Galaxy S23
+    osVersion: 13.0
+    browserName: chrome
+    deviceOrientation: portrait
+  - deviceName: iPhone 14
+    osVersion: 16
+    browserName: safari
+    deviceOrientation: portrait
+
+parallelsPerPlatform: 1
+browserstackLocal: true

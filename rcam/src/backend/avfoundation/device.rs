@@ -112,7 +112,12 @@ pub fn request_permission() -> Result<(), CameraError> {
         AVCaptureDevice::requestAccessForMediaType_completionHandler(media_type, &block);
     }
 
-    let granted = rx.recv().unwrap_or(false);
+    // Wait up to 60 s for the user to respond to the system prompt.
+    // A timeout prevents an infinite hang if the callback is never delivered
+    // (e.g. when the binary lacks NSCameraUsageDescription in its Info.plist).
+    let granted = rx
+        .recv_timeout(std::time::Duration::from_secs(60))
+        .unwrap_or(false);
     if granted {
         Ok(())
     } else {

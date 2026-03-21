@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 
 use dispatch2::{DispatchQueue, DispatchRetained};
 use objc2::rc::{Allocated, Retained};
-use objc2::runtime::{AnyObject, ProtocolObject};
+use objc2::runtime::ProtocolObject;
 use objc2::{define_class, msg_send, ClassType, DefinedClass};
 use objc2_av_foundation::{
     AVCaptureConnection, AVCaptureDeviceInput, AVCaptureOutput, AVCaptureSession,
@@ -16,11 +16,12 @@ use objc2_av_foundation::{
 };
 use objc2_core_media::CMSampleBuffer;
 use objc2_core_video::{
-    CVPixelBufferGetBaseAddress, CVPixelBufferGetBytesPerRow, CVPixelBufferGetHeight,
+    CVPixelBufferGetBaseAddress, CVPixelBufferGetBaseAddressOfPlane, CVPixelBufferGetBytesPerRow,
+    CVPixelBufferGetBytesPerRowOfPlane, CVPixelBufferGetHeight, CVPixelBufferGetPixelFormatType,
     CVPixelBufferGetWidth, CVPixelBufferLockBaseAddress, CVPixelBufferLockFlags,
     CVPixelBufferUnlockBaseAddress,
 };
-use objc2_foundation::{NSDictionary, NSNumber, NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSObject, NSObjectProtocol};
 use tokio::sync::mpsc;
 
 use crate::{CameraConfig, CameraError, Frame, FrameFormat};
@@ -121,24 +122,123 @@ fn extract_frame(sample_buffer: &CMSampleBuffer) -> Option<Frame> {
 
     let width = CVPixelBufferGetWidth(pixel_buffer) as u32;
     let height = CVPixelBufferGetHeight(pixel_buffer) as u32;
-    let bpr = CVPixelBufferGetBytesPerRow(pixel_buffer);
-    // SAFETY: base address is valid after locking.
-    let base = CVPixelBufferGetBaseAddress(pixel_buffer) as *const u8;
+    let pixel_format = CVPixelBufferGetPixelFormatType(pixel_buffer);
 
-    let data = if bpr == (width * 4) as usize {
-        // Fast path: no row stride padding.
-        // SAFETY: slice covers exactly width * height * 4 bytes.
-        unsafe { std::slice::from_raw_parts(base, (width * height * 4) as usize).to_vec() }
-    } else {
-        // Slow path: copy row-by-row to strip padding.
-        let mut data = Vec::with_capacity((width * height * 4) as usize);
-        for row in 0..height {
-            // SAFETY: each row starts at base + row * bpr.
-            let row_ptr = unsafe { base.add(row as usize * bpr) };
-            let row_slice = unsafe { std::slice::from_raw_parts(row_ptr, (width * 4) as usize) };
-            data.extend_from_slice(row_slice);
+    // kCVPixelFormatType_32BGRA = 0x42475241 ('BGRA')
+    // kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange = 0x34323076 ('420v')
+    // kCVPixelFormatType_420YpCbCr8BiPlanarFullRange  = 0x34323066 ('420f')
+    let data = match pixel_format {
+        0x42475241 => {
+            // Packed BGRA — copy row-by-row, stripping any stride padding.
+            // SAFETY: base address is valid after locking.
+            let bpr = CVPixelBufferGetBytesPerRow(pixel_buffer);
+            let base = CVPixelBufferGetBaseAddress(pixel_buffer) as *const u8;
+            if bpr == (width * 4) as usize {
+                unsafe {
+                    std::slice::from_raw_parts(base, (width * height * 4) as usize).to_vec()
+                }
+            } else {
+                let mut out = Vec::with_capacity((width * height * 4) as usize);
+                for row in 0..height {
+                    let row_ptr = unsafe { base.add(row as usize * bpr) };
+                    let row_sl =
+                        unsafe { std::slice::from_raw_parts(row_ptr, (width * 4) as usize) };
+                    out.extend_from_slice(row_sl);
+                }
+                out
+            }
         }
-        data
+        0x34323076 | 0x34323066 => {
+            // Biplanar YCbCr (NV12): plane-0 = Y, plane-1 = CbCr interleaved.
+            // Convert to BGRA using BT.601 video-range coefficients.
+            let video_range = pixel_format == 0x34323076;
+            let y_stride = CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer, 0);
+            let uv_stride = CVPixelBufferGetBytesPerRowOfPlane(pixel_buffer, 1);
+            let y_base =
+                CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, 0) as *const u8;
+            let uv_base =
+                CVPixelBufferGetBaseAddressOfPlane(pixel_buffer, 1) as *const u8;
+
+            let mut bgra = vec![0u8; (width * height * 4) as usize];
+            for row in 0..height as usize {
+                let uv_row = row >> 1;
+                for col in 0..width as usize {
+                    // SAFETY: indices are within the locked planes.
+                    let y_raw = unsafe { *y_base.add(row * y_stride + col) } as i32;
+                    let uv_off = uv_row * uv_stride + (col & !1);
+                    let cb = unsafe { *uv_base.add(uv_off) } as i32;
+                    let cr = unsafe { *uv_base.add(uv_off + 1) } as i32;
+
+                    // BT.601 integer conversion (video-range Y∈[16,235], UV∈[16,240]).
+                    let (y, cb, cr) = if video_range {
+                        (y_raw - 16, cb - 128, cr - 128)
+                    } else {
+                        (y_raw, cb - 128, cr - 128)
+                    };
+                    let c = if video_range { 298 * y } else { 256 * y };
+                    let r = ((c + 409 * cr + 128) >> 8).clamp(0, 255) as u8;
+                    let g = ((c - 100 * cb - 208 * cr + 128) >> 8).clamp(0, 255) as u8;
+                    let b = ((c + 516 * cb + 128) >> 8).clamp(0, 255) as u8;
+
+                    let off = (row * width as usize + col) * 4;
+                    bgra[off] = b;
+                    bgra[off + 1] = g;
+                    bgra[off + 2] = r;
+                    bgra[off + 3] = 255;
+                }
+            }
+            bgra
+        }
+        // kCVPixelFormatType_422YpCbCr8 = 0x32767579 ('2vuy') — UYVY packed 4:2:2
+        // Byte order per 4-byte macro-pixel: [Cb, Y0, Cr, Y1]
+        0x32767579 => {
+            let bpr = CVPixelBufferGetBytesPerRow(pixel_buffer);
+            let base = CVPixelBufferGetBaseAddress(pixel_buffer) as *const u8;
+            let mut bgra = vec![0u8; (width * height * 4) as usize];
+            for row in 0..height as usize {
+                let row_base = unsafe { base.add(row * bpr) };
+                let mut col = 0usize;
+                while col < width as usize {
+                    // Each 4-byte group covers two horizontal pixels.
+                    let byte_off = col * 2; // 2 bytes per pixel in UYVY
+                    let cb = unsafe { *row_base.add(byte_off) } as i32;
+                    let y0 = unsafe { *row_base.add(byte_off + 1) } as i32;
+                    let cr = unsafe { *row_base.add(byte_off + 2) } as i32;
+                    let y1 = unsafe { *row_base.add(byte_off + 3) } as i32;
+
+                    for (i, y_raw) in [y0, y1].iter().enumerate() {
+                        let px = col + i;
+                        if px >= width as usize {
+                            break;
+                        }
+                        // BT.601 full-range (camera outputs full-range Y)
+                        let y = y_raw - 16;
+                        let cb_ = cb - 128;
+                        let cr_ = cr - 128;
+                        let c = 298 * y;
+                        let r = ((c + 409 * cr_ + 128) >> 8).clamp(0, 255) as u8;
+                        let g = ((c - 100 * cb_ - 208 * cr_ + 128) >> 8).clamp(0, 255) as u8;
+                        let b = ((c + 516 * cb_ + 128) >> 8).clamp(0, 255) as u8;
+                        let off = (row * width as usize + px) * 4;
+                        bgra[off] = b;
+                        bgra[off + 1] = g;
+                        bgra[off + 2] = r;
+                        bgra[off + 3] = 255;
+                    }
+                    col += 2;
+                }
+            }
+            bgra
+        }
+        other => {
+            // Unknown format — log once and return an empty frame so the caller
+            // can keep running rather than silently dropping all frames.
+            eprintln!(
+                "[rcam] unsupported pixel format 0x{:08x} — frame dropped",
+                other
+            );
+            return None;
+        }
     };
 
     // SAFETY: paired with the lock above.
@@ -210,23 +310,12 @@ impl AvfSession {
         // --- Video output ---
         let video_output = unsafe { AVCaptureVideoDataOutput::new() };
 
-        // Force BGRA pixel format so extract_frame() can read packed 32-bit pixels.
-        // kCVPixelBufferPixelFormatTypeKey = "PixelFormatType"
-        // kCVPixelFormatType_32BGRA        = 0x42475241
-        {
-            let pf_key = NSString::from_str("PixelFormatType");
-            let pf_val = NSNumber::numberWithUnsignedInt(0x42475241_u32);
-            // Cast NSNumber → AnyObject via raw pointer (NSNumber is an ObjC id at runtime).
-            let pf_val_any: &AnyObject =
-                unsafe { &*(&*pf_val as *const NSNumber as *const AnyObject) };
-            let settings = unsafe {
-                NSDictionary::<NSString, AnyObject>::dictionaryWithObject_forKey(
-                    pf_val_any,
-                    ProtocolObject::from_ref(&*pf_key),
-                )
-            };
-            unsafe { video_output.setVideoSettings(Some(&settings)) };
-        }
+        // Do NOT force a specific pixel format here — letting AVFoundation use
+        // the camera's native format (typically NV12/420v on macOS) allows
+        // AVCaptureMovieFileOutput to coexist in the same session.  Forcing BGRA
+        // via setVideoSettings prevents AVCaptureMovieFileOutput from recording
+        // (AVErrorCannotRecord).  extract_frame() handles both BGRA and NV12.
+        unsafe { video_output.setVideoSettings(None) };
 
         // Wire up the delegate on the serial queue.
         // SAFETY: queue and delegate outlive this call (held in AvfSession).

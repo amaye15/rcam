@@ -1,45 +1,67 @@
-//! `AVCaptureMovieFileOutput`-based video recording — Phase 2 real implementation.
+//! `AVCaptureMovieFileOutput`-based video recording.
+//!
+//! # Threading model
+//!
+//! `startRecordingToOutputFileURL` and `stopRecording` must be called from the
+//! same OS thread, and AVFoundation dispatches `didStartRecordingToOutputFileAtURL`
+//! back to the calling thread's RunLoop.
+//!
+//! `didFinishRecordingToOutputFileAtURL` is dispatched on the GCD main queue,
+//! which the tokio runtime does not drain.  We therefore use `outputFileURL`
+//! becoming `nil` as the "recording is done" signal — this happens synchronously
+//! inside `stopRecording()` and the file is complete at that point.
+//!
+//! The entire recording lifecycle (start → wait → stop) runs in a single
+//! `spawn_blocking` closure so that AVFoundation has a stable OS thread for
+//! its RunLoop-based callbacks.
 
 use std::path::PathBuf;
-use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use objc2::rc::{Allocated, Retained};
 use objc2::runtime::ProtocolObject;
-use objc2::{define_class, msg_send, ClassType, DefinedClass};
+use objc2::{define_class, msg_send, ClassType};
 use objc2_av_foundation::{
     AVCaptureConnection, AVCaptureFileOutput, AVCaptureFileOutputRecordingDelegate,
     AVCaptureMovieFileOutput, AVCaptureSession,
 };
-use objc2_foundation::{NSArray, NSError, NSObject, NSObjectProtocol, NSString, NSURL};
-use tokio::sync::oneshot;
+use objc2_foundation::{
+    NSArray, NSDate, NSDefaultRunLoopMode, NSError, NSObject, NSObjectProtocol, NSRunLoop,
+    NSString, NSURL,
+};
 
 use crate::CameraError;
 
 use super::session::SendWrapper;
 
 // ---------------------------------------------------------------------------
-// RecordingDelegate — ObjC class that fires when recording completes
+// RunLoop helper — confines NSDefaultRunLoopMode extern-static unsafe here
 // ---------------------------------------------------------------------------
 
-pub(crate) struct RecordingDelegateIvars {
-    /// Fired when `didFinishRecording` arrives.  Wrapped in `Mutex` so we can
-    /// move the sender out (`oneshot::Sender::send` consumes `self`).
-    pub done_tx: Mutex<Option<oneshot::Sender<Result<(), String>>>>,
+/// Spin the current thread's RunLoop for one short interval.
+fn run_loop_spin(run_loop: &NSRunLoop, interval_secs: f64) {
+    let wake = NSDate::dateWithTimeIntervalSinceNow(interval_secs);
+    // SAFETY: NSDefaultRunLoopMode is a valid, fully-initialized ObjC constant.
+    unsafe { run_loop.runMode_beforeDate(NSDefaultRunLoopMode, &wake) };
 }
+
+// ---------------------------------------------------------------------------
+// RecordingDelegate — ObjC delegate (kept for protocol conformance; the
+// required `didFinishRecording` is a no-op because it fires on the GCD main
+// queue which tokio doesn't drain — see module doc for details)
+// ---------------------------------------------------------------------------
 
 define_class!(
     // SAFETY: NSObject is a valid superclass with no subclassing requirements.
     #[unsafe(super(NSObject))]
     #[name = "RcamRecordingDelegate"]
-    #[ivars = RecordingDelegateIvars]
+    #[ivars = ()]
     pub(crate) struct RecordingDelegate;
 
     impl RecordingDelegate {
         #[unsafe(method_id(init))]
         fn init(this: Allocated<Self>) -> Retained<Self> {
-            let this = this.set_ivars(RecordingDelegateIvars {
-                done_tx: Mutex::new(None),
-            });
+            let this = this.set_ivars(());
             unsafe { msg_send![super(this), init] }
         }
     }
@@ -49,59 +71,50 @@ define_class!(
 
     // SAFETY: We implement the required method with the correct selector and types.
     unsafe impl AVCaptureFileOutputRecordingDelegate for RecordingDelegate {
+        // Required method — must be present for protocol conformance even
+        // though we don't rely on it for flow control.
         #[unsafe(method(captureOutput:didFinishRecordingToOutputFileAtURL:fromConnections:error:))]
         fn capture_output_did_finish_recording(
             &self,
             _output: &AVCaptureFileOutput,
             _output_file_url: &NSURL,
             _connections: &NSArray<AVCaptureConnection>,
-            error: Option<&NSError>,
+            _error: Option<&NSError>,
         ) {
-            let result = match error {
-                Some(e) => Err(e.localizedDescription().to_string()),
-                None => Ok(()),
-            };
-            if let Ok(mut guard) = self.ivars().done_tx.lock() {
-                if let Some(tx) = guard.take() {
-                    let _ = tx.send(result);
-                }
-            }
+            // Dispatched on the GCD main queue; flow control is via outputFileURL polling.
         }
     }
 );
 
 impl RecordingDelegate {
-    pub(crate) fn new(tx: oneshot::Sender<Result<(), String>>) -> Retained<Self> {
-        // SAFETY: `new` calls our `init` which sets the default ivar.
-        let delegate: Retained<Self> = unsafe { msg_send![Self::class(), new] };
-        if let Ok(mut guard) = delegate.ivars().done_tx.lock() {
-            *guard = Some(tx);
-        }
-        delegate
+    pub(crate) fn new() -> Retained<Self> {
+        // SAFETY: `new` calls our `init` which initialises the ivars.
+        unsafe { msg_send![Self::class(), new] }
     }
 }
 
 // ---------------------------------------------------------------------------
-// AvfRecorder — wraps AVCaptureMovieFileOutput
+// AvfRecorder — manages the recording lifecycle on a dedicated blocking thread
 // ---------------------------------------------------------------------------
 
 /// Manages a live `AVCaptureMovieFileOutput` recording.
 pub(crate) struct AvfRecorder {
-    /// The movie file output added to the session.
+    /// The movie file output added to the session (for `removeOutput` later).
     pub movie_output: SendWrapper<Retained<AVCaptureMovieFileOutput>>,
-    /// The ObjC delegate that fires when writing completes.
-    pub delegate: Retained<RecordingDelegate>,
-    /// Receives the completion signal from the delegate.
-    pub done_rx: oneshot::Receiver<Result<(), String>>,
-    /// The output path (returned inside `VideoOutput::File`).
+    /// Send `()` here to trigger `stopRecording()` on the recording thread.
+    stop_tx: std::sync::mpsc::SyncSender<()>,
+    /// Await this to learn the final recording result.
+    result_rx: tokio::sync::oneshot::Receiver<Result<(), CameraError>>,
+    /// The output file path.
     pub output_path: PathBuf,
-    /// Whether `output_path` is a temporary file (Buffer output mode).
+    /// `true` when the file is a temp file that should be read and deleted.
     pub is_temp: bool,
 }
 
 impl AvfRecorder {
-    /// Attach a `AVCaptureMovieFileOutput` to `session` and start recording
-    /// to `path`.
+    /// Attach an `AVCaptureMovieFileOutput` to `session`, then launch a
+    /// `spawn_blocking` task that calls `startRecordingToOutputFileURL` and
+    /// waits for a stop signal before calling `stopRecording()`.
     pub(crate) fn start(
         session: &AVCaptureSession,
         path: PathBuf,
@@ -109,43 +122,124 @@ impl AvfRecorder {
     ) -> Result<Self, CameraError> {
         let movie_output = unsafe { AVCaptureMovieFileOutput::new() };
 
-        if unsafe { session.canAddOutput(&movie_output) } {
-            unsafe { session.addOutput(&movie_output) };
-        } else {
+        // Wrap addOutput in begin/commitConfiguration so AVFoundation atomically
+        // establishes connections on a running session before we start recording.
+        // SAFETY: all three methods are valid to call on a running AVCaptureSession.
+        let added = unsafe {
+            session.beginConfiguration();
+            let ok = session.canAddOutput(&movie_output);
+            if ok {
+                session.addOutput(&movie_output);
+            }
+            session.commitConfiguration();
+            ok
+        };
+        if !added {
             return Err(CameraError::Backend(
                 "Cannot add movie output to session".into(),
             ));
         }
 
-        let (tx, rx) = oneshot::channel();
-        let delegate = RecordingDelegate::new(tx);
+        // Resolve to an absolute path — AVFoundation requires an absolute file URL.
+        let path = if path.is_absolute() {
+            path
+        } else {
+            std::env::current_dir()
+                .map_err(|e| CameraError::Backend(e.to_string()))?
+                .join(&path)
+        };
 
-        let path_str = path
-            .to_str()
-            .ok_or_else(|| CameraError::Backend("Invalid output path".into()))?;
-        let ns_path = NSString::from_str(path_str);
-        let url = NSURL::fileURLWithPath(&ns_path);
-
-        // SAFETY: `delegate` and `url` are valid for the duration of this call.
-        unsafe {
-            movie_output.startRecordingToOutputFileURL_recordingDelegate(
-                &url,
-                ProtocolObject::from_ref(&*delegate),
-            );
+        // AVFoundation errors if the output file already exists.
+        if path.exists() {
+            std::fs::remove_file(&path)
+                .map_err(|e| CameraError::Backend(format!("Cannot remove existing file: {e}")))?;
         }
+
+        let (stop_tx, stop_rx) = std::sync::mpsc::sync_channel::<()>(1);
+        let (result_tx, result_rx) = tokio::sync::oneshot::channel::<Result<(), CameraError>>();
+
+        let delegate = RecordingDelegate::new();
+        let movie_sw = SendWrapper(movie_output.clone());
+        let delegate_sw = SendWrapper(delegate);
+        let path_clone = path.clone();
+
+        tokio::task::spawn_blocking(move || {
+            let movie = movie_sw;
+            let _delegate = delegate_sw; // keep alive for AVFoundation
+
+            let path_str = match path_clone.to_str() {
+                Some(s) => s.to_owned(),
+                None => {
+                    let _ = result_tx.send(Err(CameraError::Backend(
+                        "Recording path is not valid UTF-8".into(),
+                    )));
+                    return;
+                }
+            };
+
+            // Build URL inside the blocking thread — NSURL is not Send.
+            let ns_path = NSString::from_str(&path_str);
+            let url = NSURL::fileURLWithPath(&ns_path);
+
+            // Start recording. Callbacks from AVFoundation arrive on this
+            // thread's RunLoop (which we spin below).
+            unsafe {
+                movie.startRecordingToOutputFileURL_recordingDelegate(
+                    &url,
+                    ProtocolObject::from_ref(&**_delegate),
+                );
+            }
+
+            // Spin the RunLoop while waiting for the stop signal.
+            // This lets AVFoundation deliver didStartRecording and catch any
+            // immediate errors (e.g. AVErrorCannotRecord) via outputFileURL.
+            let run_loop = NSRunLoop::currentRunLoop();
+            loop {
+                run_loop_spin(&run_loop, 0.05);
+                match stop_rx.try_recv() {
+                    Ok(()) | Err(std::sync::mpsc::TryRecvError::Disconnected) => break,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                }
+            }
+
+            // stopRecording() sets outputFileURL to nil synchronously and
+            // finalises the file. didFinishRecording is dispatched on the GCD
+            // main queue (which tokio doesn't drain), so we poll outputFileURL
+            // instead of waiting for the callback.
+            unsafe { movie.stopRecording() };
+
+            // Spin the RunLoop briefly to let AVFoundation flush any remaining
+            // I/O and deliver any pending callbacks.
+            let flush_deadline = Instant::now() + Duration::from_millis(500);
+            while Instant::now() < flush_deadline {
+                run_loop_spin(&run_loop, 0.05);
+            }
+
+            // outputFileURL is nil → recording is finalised.
+            let result = if unsafe { movie.outputFileURL() }.is_none() {
+                Ok(())
+            } else {
+                Err(CameraError::Backend(
+                    "Recording did not stop within expected time".into(),
+                ))
+            };
+            let _ = result_tx.send(result);
+        });
 
         Ok(Self {
             movie_output: SendWrapper(movie_output),
-            delegate,
-            done_rx: rx,
+            stop_tx,
+            result_rx,
             output_path: path,
             is_temp,
         })
     }
 
-    /// Signal AVFoundation to stop writing.  The delegate will fire when the
-    /// last bytes have been flushed; await `done_rx` to get that signal.
-    pub(crate) fn stop(&self) {
-        unsafe { self.movie_output.stopRecording() };
+    /// Signal the recording thread to call `stopRecording()`, then await the result.
+    pub(crate) async fn stop_and_wait(self) -> Result<(), CameraError> {
+        let _ = self.stop_tx.send(());
+        self.result_rx
+            .await
+            .map_err(|_| CameraError::Backend("Recording task terminated unexpectedly".into()))?
     }
 }

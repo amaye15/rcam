@@ -3,6 +3,10 @@ members = [
     "rcam",
     "rcam-sys-android",
 ]
+exclude = [
+    "examples/web",
+    "examples/native",
+]
 resolver = "2"
 
 [workspace.package]

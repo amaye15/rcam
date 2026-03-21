@@ -11,6 +11,10 @@ use rcam::{CameraConfig, CameraDevice, RecordingOutput, VideoOutput};
 
 const RECORD_SECS: u64 = 5;
 
+#[cfg(target_arch = "wasm32")]
+fn main() {}
+
+#[cfg(not(target_arch = "wasm32"))]
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = CameraConfig::default();
@@ -18,7 +22,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     camera.start_stream().await?;
 
-    let output_path = PathBuf::from("recording.mp4");
+    let output_path = PathBuf::from("recording.mov");
     println!(
         "Recording {} seconds to {}…",
         RECORD_SECS,

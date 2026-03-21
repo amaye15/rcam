@@ -91,6 +91,10 @@ Runtime permission must be granted from the Java/Kotlin layer before calling any
 | `rcam` | Main public-facing crate — the only one most users need |
 | `rcam-sys-android` | Raw `unsafe` Camera2 NDK + AMediaRecorder FFI (hand-written, with optional `bindgen` regeneration) |
 
+## Testing
+
+This project is tested with BrowserStack.
+
 ## License
 
 Licensed under either of [Apache 2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your option.
