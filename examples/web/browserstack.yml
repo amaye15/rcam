@@ -1,6 +1,9 @@
 # Credentials are read from BROWSERSTACK_USERNAME / BROWSERSTACK_ACCESS_KEY env vars.
 # Do not hardcode them here.
 
+projectName: rcam
+buildName: rcam-ci
+
 browsersAndDevices:
   - browser: chrome
     browserVersion: latest
@@ -25,3 +28,10 @@ browsersAndDevices:
 
 parallelsPerPlatform: 1
 browserstackLocal: true
+
+# Playwright config passed to the SDK — baseURL must live here so the SDK
+# can inject it into the remotely launched browser context.
+playwrightConfigOptions:
+  use:
+    baseURL: 'http://localhost:8080'
+    timeout: 30000
