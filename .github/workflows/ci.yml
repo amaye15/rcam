@@ -186,6 +186,9 @@ jobs:
       - name: Install test dependencies
         run: cd examples/web && npm install
 
+      - name: Install Playwright browser binaries
+        run: cd examples/web && npx playwright install --with-deps chromium
+
       - name: Start local server
         run: python3 -m http.server 8080 --directory examples/web &
 
