@@ -2,11 +2,9 @@
   "name": "rcam-web-tests",
   "private": true,
   "scripts": {
-    "test": "playwright test",
-    "test:browserstack": "browserstack-node-sdk playwright test"
+    "test": "playwright test"
   },
   "devDependencies": {
-    "@playwright/test": "^1.40.0",
-    "browserstack-node-sdk": "^1.0.0"
+    "@playwright/test": "^1.40.0"
   }
 }
