@@ -1,5 +1,5 @@
-userName: ${BROWSERSTACK_USERNAME}
-accessKey: ${BROWSERSTACK_ACCESS_KEY}
+# Credentials are read from BROWSERSTACK_USERNAME / BROWSERSTACK_ACCESS_KEY env vars.
+# Do not hardcode them here.
 
 browsersAndDevices:
   - browser: chrome
